@@ -1,51 +1,40 @@
 # CodeImpact
 
-CodeImpact is a GitHub-integrated static analysis system designed to evaluate the potential impact of pull requests in Python and TypeScript repositories. 
+**CodeImpact** is a deterministic static-analysis and dependency-mapping engine designed to analyze pull requests, identify cross-file code impact, and recommend relevant tests prior to merging. 
 
-By constructing a localized dependency graph of source code modifications, the system deterministically surfaces affected components and recommends relevant test suites prior to execution. It incorporates an explanation engine that provides human-readable context for its recommendations, strictly bound to verifiable static analysis evidence.
+By running abstract syntax tree (AST) parsing via WebAssembly (WASM), CodeImpact generates inspectable dependency graphs and evidence-backed AI explanations entirely within the client environment—eliminating the need to execute untrusted repository code.
+
+## Performance Benchmarks
+
+CodeImpact was evaluated against a benchmark dataset of 100+ historical open-source pull requests. The analysis engine achieved the following validated metrics:
+
+* **Test-Selection Recall:** 91% identification of relevant test cases.
+* **Test-Suite Reduction:** 60% reduction in required test execution volume compared to a full-suite baseline.
+* **Analysis Latency:** 2.1 seconds median end-to-end processing time.
+* **AI Evidence-Grounding:** 97% of generated explanations correctly mapped to deterministic source provenance.
 
 ## System Architecture
 
-The platform operates via a decoupled architecture, isolating the web presentation layer from the asynchronous analysis engine.
+The application is built as a single-page application (SPA) optimized for client-side code analysis. 
 
-* **Frontend Interface:** Next.js, React, TypeScript, React Flow
-* **Backend API & Orchestration:** FastAPI, Python, Pydantic
-* **Static Analysis Engine:** Tree-sitter (Python and TypeScript grammars)
-* **Data & Queue Management:** PostgreSQL, Redis
-* **Explanation Layer:** Provider-agnostic LLM integration with strict schema validation
+* **Frontend Framework:** React, Vite, TypeScript
+* **UI/Styling:** Tailwind CSS, shadcn/ui (`src/components/ui/`)
+* **Static Analysis:** Tree-sitter compiled to WASM (`public/wasm/`)
+* **Graph Visualization:** Interactive rendering via `ImpactGraph.tsx`
 
-## Core Pipeline
+### Core Modules
 
-1. **Ingestion & Diff Extraction:** A GitHub App securely processes pull request webhooks, extracting modified file paths and line ranges.
-2. **AST Parsing:** The analysis worker uses Tree-sitter to parse base and head revisions, extracting structural symbols (functions, classes, exports) without executing untrusted repository code.
-3. **Graph Construction:** A directed dependency graph is constructed to map caller/callee relationships, imports, and test file references.
-4. **Impact Traversal:** Starting from modified nodes, the system performs a bounded breadth-first traversal to identify direct and transitive dependencies.
-5. **Ranking & Test Selection:** Affected components and candidate tests are ranked based on shortest-path distance, dependency strength, and change proximity.
-6. **Evidence-Grounded Explanation:** A structured payload of verifiable graph paths is passed to the explanation engine to summarize the impact. The system rejects generated claims that lack corresponding source evidence.
+* `src/analysis/parser.ts`: Manages the WASM Tree-sitter instances for Python and TypeScript, extracting ASTs and resolving symbol signatures.
+* `src/analysis/engine.ts`: Constructs the directed dependency graph, identifies modified symbols from diffs, and computes shortest-path traversals to rank impacted files and tests.
+* `src/analysis/benchmark.ts`: Automated evaluation pipeline for calculating precision, recall, and suite reduction against historical test fixtures.
+* `src/components/EvidencePanel.tsx`: Surfaces the AI explanation layer, mapping generated insights to exact AST node locations and dependency edges.
+* `src/components/TestTable.tsx`: Renders the ranked test recommendations with links to inspectable provenance.
 
-## Empirical Evaluation
-
-The analysis engine was evaluated against a benchmark dataset of 100+ historical open-source pull requests. The deterministic graph traversal and explanation pipeline achieved the following metrics:
-
-* **Test-selection recall:** 91%
-* **Test-suite reduction:** 60% (compared to full suite execution)
-* **Explanation grounding:** 97% of generated factual claims were successfully backed by verifiable source evidence
-* **Median analysis latency:** 2.1 seconds per pull request
-
-## Security and Limitations
-
-CodeImpact is designed as an investigative analysis tool and operates under a zero-execution security model. 
-
-* **No Arbitrary Code Execution:** The system relies entirely on static syntax parsing. It does not execute source code, test suites, or shell commands, mitigating the risk of executing malicious repository contents.
-* **LLM Boundary Constraints:** Repository contents are treated as untrusted data. The explanation engine has no authorization to alter repository state or execute operations, mitigating potential prompt injection vectors.
-* **Dynamic Resolution Constraints:** Because the system utilizes static analysis, highly dynamic runtime behaviors (e.g., Python metaprogramming, complex reflection) may result in unresolved relationships. The system is designed to report uncertainty rather than assume undocumented connections.
-
-## Local Development Setup
+## Getting Started
 
 ### Prerequisites
-* Docker and Docker Compose
-* Node.js 18+
-* Python 3.10+
+* Node.js (v18+)
+* npm or pnpm
 
 ### Installation
 
@@ -55,24 +44,34 @@ CodeImpact is designed as an investigative analysis tool and operates under a ze
    cd CodeImpact
    ```
 
-2. Configure environment variables:
+2. Install dependencies:
    ```bash
-   cp .env.example .env
-   # Configure GitHub App credentials and database URIs within .env
-   ```
-
-3. Initialize the backend, database, and Redis instances:
-   ```bash
-   docker-compose up -d
-   ```
-
-4. Start the frontend application:
-   ```bash
-   cd frontend
    npm install
+   ```
+
+3. Start the development server:
+   ```bash
    npm run dev
    ```
 
+4. Build for production:
+   ```bash
+   npm run build
+   ```
+
+## Development and Testing
+
+CodeImpact relies on deterministic heuristics for graph traversal. To run the automated analysis tests and benchmark suite:
+
+```bash
+npm run test
+```
+*(Tests are located alongside the analysis engine in `src/analysis/engine.test.ts` and `src/analysis/benchmark.test.ts`)*
+
+## Security Model
+
+CodeImpact is designed with a zero-execution security posture. All source code is treated as untrusted text. The analysis relies strictly on AST parsing, and the AI explanation engine is structurally constrained to reference only deterministic graph nodes and file bounds extracted by Tree-sitter.
+
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+[MIT License](LICENSE)
