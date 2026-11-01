@@ -27,9 +27,9 @@ export function languageFor(path: string): Language | undefined {
   return undefined
 }
 
-export function git(cwd: string, args: string[], input?: Buffer | string): Promise<Buffer> {
+export function git(cwd: string, args: string[], input?: Buffer | string, env?: NodeJS.ProcessEnv): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const child = spawn('git', args, { cwd, windowsHide: true })
+    const child = spawn('git', args, { cwd, windowsHide: true, ...(env ? { env } : {}) })
     const out: Buffer[] = []
     const err: Buffer[] = []
     child.stdout.on('data', (chunk: Buffer) => out.push(chunk))

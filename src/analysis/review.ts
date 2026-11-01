@@ -1,3 +1,4 @@
+import { isCaught } from './exceptions'
 import type {
   CallerImpact,
   CallShape,
@@ -130,7 +131,7 @@ export function classifyChange(before: SymbolRecord, after: SymbolRecord): Chang
   const result: ChangeClassification = { kinds, newRaises: [], defaults: [], types: [] }
 
   if (oldBehavior.returns.join('\n') !== newBehavior.returns.join('\n')) kinds.push('return-value')
-  if (oldBehavior.returnType !== newBehavior.returnType) {
+  if ((oldBehavior.returnTypeKey ?? oldBehavior.returnType) !== (newBehavior.returnTypeKey ?? newBehavior.returnType)) {
     kinds.push('return-type')
     result.returnType = { from: oldBehavior.returnType, to: newBehavior.returnType }
   }
@@ -141,8 +142,8 @@ export function classifyChange(before: SymbolRecord, after: SymbolRecord): Chang
   for (const param of after.params ?? []) {
     const old = oldParams.get(param.name)
     if (!old) continue
-    if (old.default !== param.default) result.defaults.push({ name: param.name, from: old.default, to: param.default })
-    if (old.type !== param.type) result.types.push({ name: param.name, from: old.type, to: param.type })
+    if ((old.defaultKey ?? old.default) !== (param.defaultKey ?? param.default)) result.defaults.push({ name: param.name, from: old.default, to: param.default })
+    if ((old.typeKey ?? old.type) !== (param.typeKey ?? param.type)) result.types.push({ name: param.name, from: old.type, to: param.type })
   }
   if (result.defaults.length > 0) kinds.push('defaults')
   if (result.types.length > 0) kinds.push('param-types')
@@ -165,14 +166,13 @@ function describeKinds(classification: ChangeClassification) {
   return classification.kinds.map((kind) => labels[kind]).join(', ')
 }
 
-function catches(caught: string[] | null, type: string) {
-  if (!caught) return false
-  const short = type.split('.').pop()
-  return caught.some((name) => name === '*' || name === type || name.split('.').pop() === short)
-}
-
 /** Why this call site is exposed to the change, or an empty list when its usage does not touch what changed. */
-export function callerExposure(classification: ChangeClassification, after: SymbolRecord, call: CallShape): string[] {
+export function callerExposure(
+  classification: ChangeClassification,
+  after: SymbolRecord,
+  call: CallShape,
+  exceptionBases: Map<string, string[]> = new Map(),
+): string[] {
   const reasons: string[] = []
   const kinds = new Set(classification.kinds)
   if ((kinds.has('return-value') || kinds.has('return-type')) && call.resultUsed) {
@@ -180,7 +180,7 @@ export function callerExposure(classification: ChangeClassification, after: Symb
       ? `uses the return value, whose type changed (${classification.returnType?.from ?? 'unannotated'} → ${classification.returnType?.to ?? 'unannotated'})`
       : 'uses the return value, and the returned expression changed')
   }
-  const uncaught = classification.newRaises.filter((type) => !catches(call.caught, type))
+  const uncaught = classification.newRaises.filter((type) => !isCaught(call.caught, type, exceptionBases))
   if (uncaught.length > 0) {
     reasons.push(`${call.caught ? 'has a try block that' : 'is not inside a try block, so it'} does not catch ${uncaught.map((type) => `\`${type}\``).join(', ')}`)
   }
@@ -208,6 +208,11 @@ export function reviewContracts(input: ReviewInput): ReviewFinding[] {
   const headCalls = input.edges.filter((edge) => edge.type === 'calls' && edge.evidenceRevision !== 'base')
   const findings: ReviewFinding[] = []
   const flaggedEdges = new Set<string>()
+  const exceptionBases = new Map<string, string[]>()
+  for (const symbol of input.head.symbols) {
+    if (symbol.kind !== 'class' || !symbol.bases?.length) continue
+    exceptionBases.set(symbol.name, [...(exceptionBases.get(symbol.name) ?? []), ...symbol.bases])
+  }
 
   const add = (finding: Omit<ReviewFinding, 'id' | 'source'>) => {
     findings.push({
@@ -334,7 +339,7 @@ export function reviewContracts(input: ReviewInput): ReviewFinding[] {
       if (!caller || caller.kind === 'test' || caller.kind === 'file' || input.changedPaths.has(caller.path)) continue
       if (callers.some((existing) => existing.location.symbolId === caller.id)) continue
       if (findings.some((finding) => finding.affected.symbolId === caller.id && finding.changed.symbolId === after.id)) continue
-      const reasons = edge.call ? callerExposure(classification, after, edge.call) : []
+      const reasons = edge.call ? callerExposure(classification, after, edge.call, exceptionBases) : []
       callers.push({
         location: { path: edge.evidencePath, line: edge.evidenceLine, revision: 'head', symbolId: caller.id, symbol: caller.qualifiedName },
         affected: reasons.length > 0,

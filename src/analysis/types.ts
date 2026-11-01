@@ -48,12 +48,15 @@ export interface SymbolRecord {
   decorators?: string[]
   /** Observable behaviour of a function body, used to classify how it changed. */
   behavior?: FunctionBehavior
+  /** Declared base classes (Python superclasses, TS `extends`), as written. */
+  bases?: string[]
 }
 
 export interface FunctionBehavior {
-  /** Normalized return (and yield) expressions; an expression-bodied arrow function counts as one. */
+  /** Syntax-tree keys of return (and yield) expressions; an expression-bodied arrow function counts as one. */
   returns: string[]
   returnType?: string
+  returnTypeKey?: string
   /** Exception types raised or thrown directly in the body; `<re-raise>` for a bare `raise`. */
   raises: string[]
 }
@@ -64,6 +67,9 @@ export interface Parameter {
   required: boolean
   default?: string
   type?: string
+  /** Syntax-tree keys, so formatting-only edits compare equal. */
+  defaultKey?: string
+  typeKey?: string
 }
 
 /** What a call site passes, enough to check it against a parameter list without type information. */
@@ -135,10 +141,10 @@ export interface ReviewFinding {
   id: string
   ruleId: string
   severity: Severity
-  /** `rule` findings come from deterministic checks; `model` findings from the optional local LLM. */
-  source: 'rule' | 'model'
+  /** Where the evidence came from: static rules, the project's type checker, or running impacted tests. */
+  source: 'rule' | 'typecheck' | 'test-run'
   /** `confirmed`: every link is a resolved edge; `inferred`: a link was matched by name only. */
-  confidence: 'confirmed' | 'inferred' | 'model'
+  confidence: 'confirmed' | 'inferred'
   message: string
   changed: ReviewLocation
   affected: ReviewLocation

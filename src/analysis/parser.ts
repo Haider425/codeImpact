@@ -16,7 +16,7 @@ import type {
   UnresolvedRelationship,
 } from './types'
 
-export const PARSER_VERSION = 'ts-parser/4'
+export const PARSER_VERSION = 'ts-parser/5'
 
 let initPromise: Promise<void> | undefined
 const languageCache = new Map<string, Promise<Parser.Language>>()
@@ -121,8 +121,8 @@ function pythonParameters(list: SyntaxNode, source: string): Parameter[] {
     const type = child.childForFieldName('type')
     params.push({
       name: text(nameNode, source), kind, required: !hasDefault,
-      ...(value ? { default: squash(text(value, source)) } : {}),
-      ...(type ? { type: squash(text(type, source)) } : {}),
+      ...(value ? { default: squash(text(value, source)), defaultKey: syntaxKey(value, source) } : {}),
+      ...(type ? { type: squash(text(type, source)), typeKey: typeKey(type, source) } : {}),
     })
   }
   return params
@@ -143,8 +143,8 @@ function typescriptParameters(list: SyntaxNode, source: string): Parameter[] {
     const required = child.type === 'required_parameter' && !value
     params.push({
       name: text(pattern, source), kind: 'positional', required,
-      ...(value ? { default: squash(text(value, source)) } : {}),
-      ...(type ? { type: squash(text(type, source).replace(/^:\s*/, '')) } : {}),
+      ...(value ? { default: squash(text(value, source)), defaultKey: syntaxKey(value, source) } : {}),
+      ...(type ? { type: squash(text(type, source).replace(/^:\s*/, '')), typeKey: typeKey(type, source) } : {}),
     })
   }
   return params
@@ -152,6 +152,33 @@ function typescriptParameters(list: SyntaxNode, source: string): Parameter[] {
 
 function squash(value: string) {
   return value.replace(/\s+/g, ' ').trim()
+}
+
+const PUNCTUATION = new Set(['(', ')', ',', ';', '[', ']', '{', '}'])
+
+/**
+ * A formatting-insensitive key for an expression: node types plus leaf text and operators, without
+ * comments, whitespace, redundant parentheses, trailing commas, or quote style.
+ */
+export function syntaxKey(node: SyntaxNode, source: string): string {
+  if (node.type === 'comment' || node.type === 'string_end') return ''
+  if (node.type === 'string_start') return `prefix:${text(node, source).replace(/["']/g, '').toLowerCase()}`
+  if (node.type === 'parenthesized_expression') {
+    const inner = node.namedChildren.filter((child) => child.type !== 'comment')
+    if (inner.length === 1) return syntaxKey(inner[0], source)
+  }
+  if (node.childCount === 0) return node.isNamed() ? `${node.type}:${text(node, source)}` : node.type
+  const parts = node.children
+    .filter((child) => child.isNamed() || !PUNCTUATION.has(child.type))
+    .map((child) => syntaxKey(child, source))
+    .filter(Boolean)
+  return `${node.type}(${parts.join(' ')})`
+}
+
+/** Type annotations wrap the type in `: T` (TS) or a `type` node (Python); key the type itself. */
+function typeKey(node: SyntaxNode, source: string) {
+  const inner = node.type === 'type_annotation' || node.type === 'type' ? node.namedChildren[0] ?? node : node
+  return syntaxKey(inner, source)
 }
 
 const FUNCTION_BOUNDARIES = new Set([
@@ -189,17 +216,18 @@ function behaviorOf(definition: SyntaxNode, file: SourceFile): FunctionBehavior 
   const behavior: FunctionBehavior = {
     returns: [],
     raises: [],
-    ...(returnType ? { returnType: squash(text(returnType, file.source).replace(/^:\s*/, '')) } : {}),
+    ...(returnType ? { returnType: squash(text(returnType, file.source).replace(/^:\s*/, '')), returnTypeKey: typeKey(returnType, file.source) } : {}),
   }
   if (fn.type === 'arrow_function' && body.type !== 'statement_block') {
-    behavior.returns.push(squash(text(body, file.source)))
+    behavior.returns.push(syntaxKey(body, file.source))
     return behavior
   }
   for (const node of ownDescendants(body)) {
     if (node.type === 'return_statement') {
-      behavior.returns.push(squash(text(node, file.source).replace(/^return\b/, '').replace(/;$/, '')) || '<none>')
+      const value = node.namedChildren.find((child) => child.type !== 'comment')
+      behavior.returns.push(value ? syntaxKey(value, file.source) : '<none>')
     } else if (node.type === 'yield' || node.type === 'yield_expression') {
-      behavior.returns.push(squash(text(node, file.source)))
+      behavior.returns.push(syntaxKey(node, file.source))
     } else if (node.type === 'raise_statement' || node.type === 'throw_statement') {
       behavior.raises.push(raisedType(node, file.source))
     }
@@ -245,7 +273,16 @@ function declaration(
     resolutionStatus: 'resolved',
     ...(kind === 'function' || kind === 'method' ? { params: parametersOf(definition, file), behavior: behaviorOf(definition, file) } : {}),
     ...(file.language === 'python' && kind !== 'file' ? { decorators: decoratorsOf(definition, file.source) } : {}),
+    ...(kind === 'class' ? { bases: basesOf(definition, file.source) } : {}),
   }
+}
+
+function basesOf(definition: SyntaxNode, source: string) {
+  const python = definition.childForFieldName('superclasses')
+  if (python) return python.namedChildren.filter((child) => child.type !== 'keyword_argument' && child.type !== 'comment').map((child) => squash(text(child, source)))
+  const heritage = definition.namedChildren.find((child) => child.type === 'class_heritage')
+  const extendsClause = heritage?.namedChildren.find((child) => child.type === 'extends_clause')
+  return (extendsClause?.namedChildren ?? []).filter((child) => child.type !== 'type_arguments').map((child) => squash(text(child, source)))
 }
 
 const testCallees = new Set(['it', 'test'])
@@ -771,8 +808,6 @@ function resultUsed(call: SyntaxNode) {
   return node.parent?.type !== 'expression_statement'
 }
 
-const CATCH_ALL = new Set(['Exception', 'BaseException'])
-
 /** Exceptions caught around a call by `try` blocks inside the same function. */
 function caughtAround(call: SyntaxNode, source: string): string[] | null {
   let caught: string[] | null = null
@@ -789,7 +824,7 @@ function caughtAround(call: SyntaxNode, source: string): string[] | null {
       }
       const types = header.type === 'as_pattern' ? header.namedChildren[0] : header
       for (const name of text(types ?? header, source).match(/[A-Za-z_][\w.]*/g) ?? []) {
-        caught.push(CATCH_ALL.has(name) ? '*' : name)
+        caught.push(name)
       }
     }
   }
