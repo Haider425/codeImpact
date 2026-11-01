@@ -2,7 +2,10 @@ import Parser from 'web-tree-sitter'
 
 type SyntaxNode = Parser.SyntaxNode
 import type {
+  CallShape,
   EdgeRecord,
+  ImportBinding,
+  Parameter,
   ParseResult,
   ParserOptions,
   Revision,
@@ -12,7 +15,7 @@ import type {
   UnresolvedRelationship,
 } from './types'
 
-export const PARSER_VERSION = 'ts-parser/2'
+export const PARSER_VERSION = 'ts-parser/3'
 
 let initPromise: Promise<void> | undefined
 const languageCache = new Map<string, Promise<Parser.Language>>()
@@ -81,6 +84,69 @@ function isOverloadStub(node: SyntaxNode, source: string) {
   return Boolean(decorated?.namedChildren.some((child) => child.type === 'decorator' && /(^|\.)overload\s*$/.test(text(child, source).replace(/^@/, ''))))
 }
 
+function decoratorsOf(definition: SyntaxNode, source: string) {
+  const decorated = definition.parent?.type === 'decorated_definition' ? definition.parent : null
+  return (decorated?.namedChildren ?? [])
+    .filter((child) => child.type === 'decorator')
+    .map((child) => text(child, source).replace(/^@\s*/, '').replace(/\(.*$/s, '').trim())
+}
+
+function pythonParameters(list: SyntaxNode, source: string): Parameter[] {
+  const params: Parameter[] = []
+  let kind: Parameter['kind'] = 'positional'
+  for (const child of list.namedChildren) {
+    if (child.type === 'positional_separator') {
+      params.forEach((param) => { if (param.kind === 'positional') param.kind = 'positional-only' })
+      continue
+    }
+    if (child.type === 'keyword_separator') {
+      kind = 'keyword-only'
+      continue
+    }
+    const inner = child.type === 'typed_parameter' ? child.namedChildren[0] : child
+    if (inner?.type === 'list_splat_pattern') {
+      params.push({ name: text(inner, source).replace(/^\*/, ''), kind: 'var-positional', required: false })
+      kind = 'keyword-only'
+      continue
+    }
+    if (inner?.type === 'dictionary_splat_pattern') {
+      params.push({ name: text(inner, source).replace(/^\*\*/, ''), kind: 'var-keyword', required: false })
+      continue
+    }
+    const hasDefault = child.type === 'default_parameter' || child.type === 'typed_default_parameter'
+    const nameNode = hasDefault ? child.childForFieldName('name') : inner
+    if (nameNode?.type !== 'identifier') continue
+    params.push({ name: text(nameNode, source), kind, required: !hasDefault })
+  }
+  return params
+}
+
+function typescriptParameters(list: SyntaxNode, source: string): Parameter[] {
+  const params: Parameter[] = []
+  for (const child of list.namedChildren) {
+    if (child.type !== 'required_parameter' && child.type !== 'optional_parameter') continue
+    const pattern = child.childForFieldName('pattern')
+    if (!pattern || pattern.type === 'this') continue
+    if (pattern.type === 'rest_pattern') {
+      params.push({ name: text(pattern, source).replace(/^\.\.\./, ''), kind: 'var-positional', required: false })
+      continue
+    }
+    const required = child.type === 'required_parameter' && !child.childForFieldName('value')
+    params.push({ name: text(pattern, source), kind: 'positional', required })
+  }
+  return params
+}
+
+function parametersOf(definition: SyntaxNode, file: SourceFile): Parameter[] | undefined {
+  // `const f = (a) => …` keeps its parameters on the arrow function, not the declarator.
+  const fn = definition.type === 'variable_declarator' ? definition.childForFieldName('value') : definition
+  if (!fn) return undefined
+  const list = fn.childForFieldName('parameters')
+  if (list) return file.language === 'python' ? pythonParameters(list, file.source) : typescriptParameters(list, file.source)
+  const single = fn.childForFieldName('parameter') // `x => …`
+  return single ? [{ name: text(single, file.source), kind: 'positional', required: true }] : undefined
+}
+
 function declaration(
   definition: SyntaxNode,
   file: SourceFile,
@@ -105,6 +171,8 @@ function declaration(
     source,
     signature,
     resolutionStatus: 'resolved',
+    ...(kind === 'function' || kind === 'method' ? { params: parametersOf(definition, file) } : {}),
+    ...(file.language === 'python' && kind !== 'file' ? { decorators: decoratorsOf(definition, file.source) } : {}),
   }
 }
 
@@ -602,6 +670,29 @@ function resolveMember(objectNode: SyntaxNode, attribute: string, caller: Symbol
   }
 }
 
+function callShape(call: SyntaxNode, calleeNode: SyntaxNode, method: string, source: string): CallShape {
+  const args = call.childForFieldName('arguments')
+  let positional = 0
+  let spread = false
+  const keywords: string[] = []
+  if (args?.type === 'generator_expression') positional = 1 // f(x for x in y)
+  for (const arg of args?.type === 'generator_expression' ? [] : args?.namedChildren ?? []) {
+    if (arg.type === 'comment') continue
+    if (arg.type === 'keyword_argument') {
+      const name = arg.childForFieldName('name')
+      if (name) keywords.push(text(name, source))
+    } else if (arg.type === 'list_splat' || arg.type === 'dictionary_splat' || arg.type === 'spread_element') {
+      spread = true
+    } else {
+      positional += 1
+    }
+  }
+  const receiver: CallShape['receiver'] = calleeNode.type === 'identifier' || method === 'module attribute'
+    ? 'none'
+    : method === 'class member lookup' ? 'unbound' : 'bound'
+  return { positional, keywords, spread, receiver }
+}
+
 function linkCalls(scope: ModuleScope, index: RevisionIndex) {
   const { file, root, symbols } = scope
   const edges: EdgeRecord[] = []
@@ -638,6 +729,7 @@ function linkCalls(scope: ModuleScope, index: RevisionIndex) {
     }
 
     const sourceSymbol = caller ?? fileSymbol
+    const shape = callShape(node, calleeNode, resolution.method, file.source)
     for (const target of resolution.targets) {
       if (sourceSymbol.id === target.id) continue
       edges.push({
@@ -649,6 +741,7 @@ function linkCalls(scope: ModuleScope, index: RevisionIndex) {
         evidenceLine: line(node),
         extractionMethod: `tree-sitter call expression + ${resolution.method}`,
         resolutionStatus: resolution.kind,
+        call: shape,
       })
     }
   }
@@ -680,7 +773,7 @@ export async function parseRevision(revision: Revision, options: ParserOptions):
   await initialize(options)
   const parser = new Parser()
   const resolver = new ModuleResolver(revision.files)
-  const result: ParseResult = { symbols: [], edges: [], unresolved: [] }
+  const result: ParseResult = { symbols: [], edges: [], unresolved: [], imports: [] }
   const scopes: ModuleScope[] = []
   try {
     for (const file of revision.files) {
@@ -705,6 +798,11 @@ export async function parseRevision(revision: Revision, options: ParserOptions):
       result.symbols.push(...scope.symbols)
       result.edges.push(...containsEdges(scope.symbols), ...scope.importEdges, ...linked.edges)
       result.unresolved.push(...scope.unresolvedImports, ...linked.unresolved)
+      for (const [local, binding] of scope.names) {
+        const record: ImportBinding = { path: scope.file.path, line: binding.line, local, exported: binding.exported, module: binding.path }
+        const resolved = binding.path ? index.resolveExport(binding.path, binding.exported) : undefined
+        result.imports.push(resolved ? { ...record, resolvedId: resolved.id } : record)
+      }
     }
   } finally {
     scopes.forEach((scope) => scope.root.tree.delete())
@@ -716,5 +814,6 @@ export async function parseRevision(revision: Revision, options: ParserOptions):
   result.symbols.sort((a, b) => a.id.localeCompare(b.id))
   result.edges.sort((a, b) => a.id.localeCompare(b.id))
   result.unresolved.sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line || a.expression.localeCompare(b.expression))
+  result.imports.sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line || a.local.localeCompare(b.local))
   return result
 }

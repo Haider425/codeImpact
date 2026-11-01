@@ -54,6 +54,7 @@ export function compactResult(result: AnalysisResult, base: SourceFile[], head: 
     ...edges.map((e) => e.evidencePath),
     ...unresolved.map((u) => u.path),
     ...result.changes.map((c) => (c.head ?? c.base)!.path),
+    ...result.review.flatMap((finding) => [finding.changed.path, finding.affected.path]),
   ])
   return {
     result: {

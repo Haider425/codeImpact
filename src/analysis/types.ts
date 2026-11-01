@@ -42,6 +42,26 @@ export interface SymbolRecord {
   source: string
   signature: string
   resolutionStatus: ResolutionStatus
+  /** Declared parameters for functions and methods, in order. */
+  params?: Parameter[]
+  /** Python decorator expressions without the `@`, e.g. `staticmethod`, `functools.cache`. */
+  decorators?: string[]
+}
+
+export interface Parameter {
+  name: string
+  kind: 'positional-only' | 'positional' | 'keyword-only' | 'var-positional' | 'var-keyword'
+  required: boolean
+}
+
+/** What a call site passes, enough to check it against a parameter list without type information. */
+export interface CallShape {
+  positional: number
+  keywords: string[]
+  /** `*args`, `**kwargs`, or `...spread` make the argument count unknowable statically. */
+  spread: boolean
+  /** `none`: plain or module-attribute call; `bound`: obj.m() / self.m(); `unbound`: Class.m(). */
+  receiver: 'none' | 'bound' | 'unbound'
 }
 
 export interface EdgeRecord {
@@ -54,6 +74,7 @@ export interface EdgeRecord {
   extractionMethod: string
   resolutionStatus: ResolutionStatus
   evidenceRevision?: 'base' | 'head'
+  call?: CallShape
 }
 
 export interface UnresolvedRelationship {
@@ -63,10 +84,47 @@ export interface UnresolvedRelationship {
   reason: string
 }
 
+/** One imported name in one file, and the declaration it resolves to (if any). */
+export interface ImportBinding {
+  path: string
+  line: number
+  local: string
+  exported: string
+  /** Module file the import names; empty when the module itself is missing. */
+  module: string
+  resolvedId?: string
+}
+
 export interface ParseResult {
   symbols: SymbolRecord[]
   edges: EdgeRecord[]
   unresolved: UnresolvedRelationship[]
+  imports: ImportBinding[]
+}
+
+export type Severity = 'high' | 'medium' | 'low'
+
+export interface ReviewLocation {
+  path: string
+  line: number
+  revision: 'base' | 'head'
+  symbolId?: string
+  symbol?: string
+}
+
+export interface ReviewFinding {
+  id: string
+  ruleId: string
+  severity: Severity
+  /** `rule` findings come from deterministic checks; `model` findings from the optional local LLM. */
+  source: 'rule' | 'model'
+  /** `confirmed`: every link is a resolved edge; `inferred`: a link was matched by name only. */
+  confidence: 'confirmed' | 'inferred' | 'model'
+  message: string
+  changed: ReviewLocation
+  affected: ReviewLocation
+  /** Edge ids that connect the change to the affected location. */
+  evidence: string[]
 }
 
 export interface ChangeRecord {
@@ -111,6 +169,7 @@ export interface AnalysisResult {
   findings: ImpactFinding[]
   tests: TestRecommendation[]
   unresolved: UnresolvedRelationship[]
+  review: ReviewFinding[]
   graphSymbolIds: string[]
   stats: {
     parsedFiles: number

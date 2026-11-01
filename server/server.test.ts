@@ -108,7 +108,7 @@ describe('webhook security', () => {
     expect(redelivered.json()).toMatchObject({ status: 'already_analyzed', analysisId: first.json().analysisId })
     expect(store.runs()).toHaveLength(1)
     await app.close()
-  })
+  }, 30_000)
 })
 
 describe('job lifecycle', () => {

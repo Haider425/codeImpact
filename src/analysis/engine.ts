@@ -1,4 +1,5 @@
 import { fileSymbolId, parseRevision, PARSER_VERSION } from './parser'
+import { reviewContracts } from './review'
 import type {
   AnalysisResult,
   ChangeRecord,
@@ -12,7 +13,7 @@ import type {
   TestRecommendation,
 } from './types'
 
-export const ALGORITHM_VERSION = 'impact-bfs/2'
+export const ALGORITHM_VERSION = 'impact-bfs/3'
 export const DEFAULT_MAX_DEPTH = 8
 
 /** Weights for the documented ranking heuristic. They order inspection priority; they are not probabilities. */
@@ -364,11 +365,12 @@ export async function analyzeRepository(repository: DemoRepository, options: Ana
   ])].filter((id) => symbolsById.has(id))
   const baseFiles = new Map(repository.base.files.map((file) => [file.path, file]))
   const headFiles = new Map(repository.head.files.map((file) => [file.path, file]))
-  const changedFiles = [...new Set([...baseFiles.keys(), ...headFiles.keys()])].filter((path) => {
+  const changedFilePaths = new Set([...new Set([...baseFiles.keys(), ...headFiles.keys()])].filter((path) => {
     const before = baseFiles.get(path)
     const after = headFiles.get(path)
     return !before || !after || normalized(before.source) !== normalized(after.source)
-  }).length
+  }))
+  const review = reviewContracts({ base, head, changes, edges, headFiles: repository.head.files, changedPaths: changedFilePaths })
   const callEdges = head.edges.filter((edge) => edge.type === 'calls')
 
   await options.onStage?.('completed')
@@ -379,10 +381,11 @@ export async function analyzeRepository(repository: DemoRepository, options: Ana
     findings,
     tests,
     unresolved: head.unresolved,
+    review,
     graphSymbolIds,
     stats: {
       parsedFiles: repository.head.files.length,
-      changedFiles,
+      changedFiles: changedFilePaths.size,
       changedSymbols: changes.length,
       impactedSymbols: findings.length,
       recommendedTests: tests.length,
