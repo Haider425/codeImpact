@@ -1,73 +1,87 @@
-# React + TypeScript + Vite
+# CodeImpact
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+CodeImpact analyzes a pull request in a Python or TypeScript repository. It finds the symbols that changed, traces their callers through a static dependency graph, and ranks the tests worth running. Every recommendation comes with the evidence behind it. Repository code is parsed, never executed.
 
-Currently, two official plugins are available:
+The full product spec is in [codeImpact_mvp.md](codeImpact_mvp.md).
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Quick start
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run server      # API + inline worker on http://127.0.0.1:8787
+npm run dev         # web UI on http://localhost:3000 (proxies /api to the server)
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Open the UI and paste a public pull-request URL, such as `https://github.com/pallets/itsdangerous/pull/428`. The **Offline demo** link runs the bundled fixture entirely in the browser, with no server.
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+For a production-style single process, run `npm run build && npm run server`. The server also serves `dist/`.
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+Configuration lives in environment variables; see [.env.example](.env.example). Nothing is required. A `GITHUB_TOKEN` raises rate limits and allows private repositories. An `ANTHROPIC_API_KEY` switches explanations from the deterministic template to Claude.
+
+## How it works
+
 ```
+GitHub PR / local range
+  └─ fetch merge-base + head (shallow, bare cache, no checkout)      server/github.ts, server/git.ts
+      └─ parse both revisions with tree-sitter (Python, TS, TSX)       src/analysis/parser.ts
+          └─ resolve imports & calls → typed, evidence-carrying edges
+              └─ diff symbols (body, signature, rename, module-level)   src/analysis/engine.ts
+                  └─ BFS over reverse call edges, depth-limited
+                      └─ rank findings + tests (documented weights)
+                          └─ bounded evidence bundle → explanation      server/explain.ts
+                              └─ validate every reference, else template
+```
+
+- **Edges carry provenance**: file, line, revision, extraction method, and a resolution status. `resolved` means confirmed through a declaration or import. `inferred` means matched by method name when the receiver type is unknown, including small override families. Calls that can't be resolved safely are listed, not dropped.
+- **Ranking** (`RANKING_WEIGHTS` in `src/analysis/engine.ts`): 45% proximity, 20% direct link, 10% resolution, 10% test link, 10% fan-in, 5% exported API. Tests changed in the PR score 100. Tests linked only by a file import score 15. Scores order review priority; they are not failure probabilities.
+- **Explanations** see only names, paths, lines, and edge refs, never source code. Output is schema-validated. Any claim citing an unknown ref, or evidence that isn't on that item's own path, is removed. If more than half the claims fail, the deterministic template is used instead.
+- **Jobs** follow `queued → fetching → parsing → graphing → ranking → explaining → completed | failed`. Runs are deduplicated by repository, PR, commits, and engine version. Transient failures retry with backoff, and runs abandoned by a crashed worker are recovered. Webhook deliveries are HMAC-verified and deduplicated by delivery ID.
+
+## API
+
+| Method | Path | |
+|---|---|---|
+| GET | `/api/config` | Server capabilities and versions |
+| POST | `/api/analyses` | `{ "pullRequest": "owner/repo#12" }` → 202 `{ id }` (200 if deduplicated) |
+| POST | `/api/local-analyses` | `{ repository, base, head }` for allow-listed local checkouts |
+| GET | `/api/analyses`, `/api/analyses/:id` | History and status with stage timings |
+| GET | `/api/analyses/:id/report` | Findings, tests, graph, evidence files, explanation |
+| GET | `/api/analyses/:id/findings` · `/tests` · `/graph` | Slices of the report |
+| POST | `/api/analyses/:id/retry` | Re-queue a failed run |
+| GET | `/api/github/:owner/:repo/pull-requests` | Open PRs |
+| GET/DELETE | `/api/repositories[/:id[/connection]]` | Connected repositories |
+| POST | `/api/webhooks/github` | `pull_request` opened / synchronize / reopened |
+
+## Scripts
+
+| | |
+|---|---|
+| `npm test` | Engine, resolution, server, and security tests (the benchmark test runs when a clone exists) |
+| `npm run bench` | Clones `pallets/itsdangerous` and writes `benchmark/REPORT.md` and `results.json` |
+| `npm run typecheck` · `npm run lint` | |
+| `npm run worker` | Standalone worker; use with `CODEIMPACT_WORKER=external` |
+
+## Status against the MVP spec
+
+Done:
+
+- Python and TypeScript/TSX parsing. Import resolution covers relative imports, `src/` layouts, package re-exports, TS barrels, and default and namespace imports. Call resolution covers `self`/`this` methods, constructors, and module attributes.
+- Change detection: body, signature, rename, deleted, added, module-level, and decorator changes. `@overload` stubs are skipped.
+- Depth-limited BFS impact analysis with direct/transitive labels and evidence paths.
+- Test recommendations with connection type, reasons, and limitations.
+- Four baselines plus the graph strategy, with recall, reduction, and precision@K metrics, and a reproducible benchmark with a tune/holdout split.
+- GitHub PR ingestion at the merge base with resource limits, and local git ranges.
+- SQLite persistence, job queue, worker, retries, stale-job recovery, and deduplication.
+- Webhook endpoint with HMAC verification and delivery deduplication.
+- Grounded explanation pipeline: provider adapter, schema validation, reference checking, and a deterministic fallback.
+- Web UI: dashboard, history, live progress, report, dependency map, evidence inspector, source viewer, baselines, and export.
+
+Not done yet:
+
+- **GitHub sign-in and per-user repository authorization.** There is no auth today, so keep the server bound to `127.0.0.1` and don't expose it with a token that can read private repositories.
+- A GitHub App installation flow, plus Checks and inline annotations (P1).
+- Postgres and Redis. SQLite covers both storage and the queue for now; the schema follows the spec's tables, with findings stored as JSON per run.
+- pytest fixture and inheritance linking, and tsconfig `paths` aliases.
+- A larger labelled benchmark. Four commits is a harness, not evidence.
+- An explanation audit tool for human claim review, and API rate limiting.
+- Deployment config (Docker, CI) and centralized monitoring.

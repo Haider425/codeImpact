@@ -1,6 +1,6 @@
 export type Language = 'python' | 'typescript'
 export type SymbolKind = 'file' | 'function' | 'method' | 'class' | 'interface' | 'test'
-export type ChangeType = 'added' | 'modified' | 'deleted' | 'signature'
+export type ChangeType = 'added' | 'modified' | 'deleted' | 'signature' | 'renamed' | 'module'
 export type EdgeType = 'contains' | 'imports' | 'calls'
 export type ResolutionStatus = 'resolved' | 'inferred' | 'unresolved'
 
@@ -72,6 +72,8 @@ export interface ParseResult {
 export interface ChangeRecord {
   symbolId: string
   changeType: ChangeType
+  /** For renames: the base-revision symbol this one replaces. */
+  previousId?: string
   base?: SymbolRecord
   head?: SymbolRecord
 }
@@ -98,6 +100,8 @@ export interface TestRecommendation {
   path: EvidencePath
   reasons: string[]
   limitation: string
+  /** How the test is connected to the change, strongest first. */
+  connection: 'changed' | 'call-path' | 'file-import'
 }
 
 export interface AnalysisResult {
@@ -116,6 +120,15 @@ export interface AnalysisResult {
     recommendedTests: number
     unresolved: number
     durationMs: number
+    totalTests: number
+    callEdges: number
+    inferredCallEdges: number
+  }
+  settings: {
+    maxDepth: number
+    depthLimited: boolean
+    algorithmVersion: string
+    parserVersion: string
   }
   limitations: string[]
 }

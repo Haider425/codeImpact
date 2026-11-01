@@ -72,6 +72,7 @@ function SourceDialogContent({ repository, selection, onClose }: SourceDialogCon
           <span>Repository code is parsed, never executed.</span>
         </div>
         <div className="source-code" role="region" aria-label="Source code">
+          {!file && <p className="source-missing">This file is not part of the stored evidence for the {revision} revision.</p>}
           {file?.source.split('\n').map((line, index) => {
             const lineNumber = index + 1
             const highlighted = lineNumber === selection?.line

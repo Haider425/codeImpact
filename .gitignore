@@ -1,6 +1,7 @@
 node_modules
 .env
 .env.*
+!.env.example
 dist
 build
 coverage
@@ -10,3 +11,6 @@ yarn-error.log*
 .DS_Store
 # Logs
 node_modules
+
+# CodeImpact runtime data (SQLite, fetched repositories, benchmark clones)
+data
