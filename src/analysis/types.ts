@@ -46,12 +46,24 @@ export interface SymbolRecord {
   params?: Parameter[]
   /** Python decorator expressions without the `@`, e.g. `staticmethod`, `functools.cache`. */
   decorators?: string[]
+  /** Observable behaviour of a function body, used to classify how it changed. */
+  behavior?: FunctionBehavior
+}
+
+export interface FunctionBehavior {
+  /** Normalized return (and yield) expressions; an expression-bodied arrow function counts as one. */
+  returns: string[]
+  returnType?: string
+  /** Exception types raised or thrown directly in the body; `<re-raise>` for a bare `raise`. */
+  raises: string[]
 }
 
 export interface Parameter {
   name: string
   kind: 'positional-only' | 'positional' | 'keyword-only' | 'var-positional' | 'var-keyword'
   required: boolean
+  default?: string
+  type?: string
 }
 
 /** What a call site passes, enough to check it against a parameter list without type information. */
@@ -62,6 +74,13 @@ export interface CallShape {
   spread: boolean
   /** `none`: plain or module-attribute call; `bound`: obj.m() / self.m(); `unbound`: Class.m(). */
   receiver: 'none' | 'bound' | 'unbound'
+  /** False when the call is a bare statement whose result is discarded. */
+  resultUsed: boolean
+  /**
+   * Exceptions caught by enclosing `try` blocks within the caller: `null` when the call is not inside
+   * a `try` body, `['*']` for a catch-all (bare `except`, `Exception`, any JS `catch`).
+   */
+  caught: string[] | null
 }
 
 export interface EdgeRecord {
@@ -125,6 +144,23 @@ export interface ReviewFinding {
   affected: ReviewLocation
   /** Edge ids that connect the change to the affected location. */
   evidence: string[]
+  details?: ReviewDetails
+}
+
+export type ChangeKind = 'return-value' | 'return-type' | 'raises' | 'defaults' | 'param-types' | 'parameters' | 'internals'
+
+export interface CallerImpact {
+  location: ReviewLocation
+  /** True when the kind of change matches how this caller uses the function. */
+  affected: boolean
+  reasons: string[]
+  confirmed: boolean
+  edgeId: string
+}
+
+export interface ReviewDetails {
+  changeKinds: ChangeKind[]
+  callers: CallerImpact[]
 }
 
 export interface ChangeRecord {

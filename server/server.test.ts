@@ -8,8 +8,7 @@ import { buildApp } from './app'
 import { loadConfig } from './config'
 import type { Config } from './config'
 import { Store } from './db'
-import { buildEvidenceBundle, explainAnalysis, templateExplanation, validateExplanation } from './explain'
-import type { Explanation, ExplanationProvider } from './explain'
+import { buildEvidenceBundle, explainAnalysis } from './explain'
 import { git } from './git'
 import { GitHubClient, parsePullRequestRef } from './github'
 import type { PullRequestInfo, RepositoryInfo } from './github'
@@ -26,7 +25,6 @@ function testConfig(overrides: Partial<Config> = {}): Config {
     dataDir: join(workspace, 'data'),
     localRepositories: new Map([['sample', repoDir]]),
     webhookSecret: 'shh',
-    anthropicConfigured: false,
     ...overrides,
   }
 }
@@ -176,7 +174,7 @@ describe('end-to-end local analysis', () => {
     expect(report.result.tests.map((t: { test: { name: string } }) => t.test.name)).toEqual(['test_total'])
     expect(report.files.head.map((f: { path: string }) => f.path).sort()).toEqual(['src/pricing.py', 'tests/test_pricing.py'])
     expect(report.changedFiles).toEqual([{ path: 'src/pricing.py', status: 'modified' }])
-    expect(report.explanation).toMatchObject({ modelIdentifier: 'deterministic-template', validationStatus: 'fallback' })
+    expect(report.explanation).toMatchObject({ modelIdentifier: 'deterministic-template', validationStatus: 'template' })
     expect(JSON.stringify(report)).not.toContain('node_modules')
     await app.close()
   }, 30_000)
@@ -199,35 +197,16 @@ describe('explanation grounding', async () => {
     bundle.findings.forEach((finding) => finding.evidence.forEach((ref) => expect(bundle.edges.some((edge) => edge.ref === ref)).toBe(true)))
   })
 
-  it('drops claims with unknown refs or evidence that is not on the item path', () => {
-    const template = templateExplanation(bundle)
-    const otherEdge = bundle.edges.find((edge) => !bundle.findings[0].evidence.includes(edge.ref))!.ref
-    const raw: Explanation = {
-      ...template,
-      summary: 'Changing `apply_discount` affects `launch_missiles`.',
-      affected: [
-        { ref: bundle.findings[0].ref, explanation: 'ok', evidence: bundle.findings[0].evidence },
-        { ref: bundle.findings[0].ref, explanation: 'wrong edge', evidence: [otherEdge] },
-        { ref: 'F999', explanation: 'invented', evidence: [] },
-      ],
+  it('builds the explanation deterministically from the bundle, citing only bundle refs', () => {
+    const generated = explainAnalysis(bundle)
+    expect(generated).toMatchObject({ status: 'template', modelIdentifier: 'deterministic-template', issues: [] })
+    expect(explainAnalysis(bundle).explanation).toEqual(generated.explanation)
+    const refs = new Set([...bundle.changes, ...bundle.findings, ...bundle.tests, ...bundle.edges, ...bundle.unresolved].map((item) => item.ref))
+    const { changed, affected, tests, uncertainty } = generated.explanation
+    for (const item of [...changed, ...affected, ...tests]) {
+      expect(refs.has(item.ref)).toBe(true)
+      item.evidence?.forEach((ref) => expect(refs.has(ref)).toBe(true))
     }
-    const { explanation, issues } = validateExplanation(raw, bundle)
-    expect(explanation.affected).toHaveLength(1)
-    expect(explanation.summary).not.toContain('launch_missiles')
-    expect(issues).toHaveLength(3)
-  })
-
-  it('falls back to the deterministic template when the provider fails or invents most claims', async () => {
-    const failing: ExplanationProvider = { modelIdentifier: 'fake', explain: async () => { throw new Error('boom') } }
-    expect(await explainAnalysis(bundle, failing)).toMatchObject({ status: 'fallback', modelIdentifier: 'deterministic-template' })
-
-    const inventive: ExplanationProvider = {
-      modelIdentifier: 'fake',
-      explain: async () => ({ summary: 'x', changed: [{ ref: 'C99', explanation: 'x' }], affected: [{ ref: 'F99', explanation: 'x', evidence: [] }], tests: [], uncertainty: [] }),
-    }
-    expect((await explainAnalysis(bundle, inventive)).status).toBe('fallback')
-
-    const faithful: ExplanationProvider = { modelIdentifier: 'fake', explain: async () => templateExplanation(bundle) }
-    expect(await explainAnalysis(bundle, faithful)).toMatchObject({ status: 'valid', modelIdentifier: 'fake', issues: [] })
+    uncertainty.flatMap((note) => note.refs).forEach((ref) => expect(refs.has(ref)).toBe(true))
   })
 })

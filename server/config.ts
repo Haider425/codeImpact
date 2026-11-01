@@ -35,8 +35,6 @@ export interface Config {
   githubToken?: string
   webhookSecret?: string
   localRepositories: Map<string, string>
-  anthropicConfigured: boolean
-  llmModel: string
   maxDepth: number
   inlineWorker: boolean
   maxAttempts: number
@@ -52,8 +50,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     githubToken: env.GITHUB_TOKEN || undefined,
     webhookSecret: env.GITHUB_WEBHOOK_SECRET || undefined,
     localRepositories: parseLocalRepositories(env.CODEIMPACT_LOCAL_REPOS),
-    anthropicConfigured: Boolean(env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN) && env.CODEIMPACT_LLM !== 'off',
-    llmModel: env.CODEIMPACT_LLM_MODEL ?? 'claude-opus-5-5',
     maxDepth: Number(env.CODEIMPACT_MAX_DEPTH ?? DEFAULT_MAX_DEPTH),
     inlineWorker: env.CODEIMPACT_WORKER !== 'external',
     maxAttempts: Number(env.CODEIMPACT_MAX_ATTEMPTS ?? 3),

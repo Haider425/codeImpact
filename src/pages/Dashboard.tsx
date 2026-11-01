@@ -116,7 +116,6 @@ export default function Dashboard() {
 
         {config && (
           <section className="status-strip" aria-label="Server capabilities">
-            <span>{config.explanationModel ? <Check size={13} /> : <X size={13} />}Explanations: {config.explanationModel ?? 'deterministic template'}</span>
             <span>{config.webhookConfigured ? <Check size={13} /> : <X size={13} />}Webhook {config.webhookConfigured ? 'enabled' : 'disabled'}</span>
             <span>Python · TypeScript</span>
             <span>depth ≤ {config.maxDepth}</span>

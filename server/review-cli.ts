@@ -38,7 +38,16 @@ try {
       console.log(`[${finding.severity.toUpperCase()}] ${finding.ruleId} (${finding.source}, ${finding.confidence})`)
       console.log(`  ${finding.message.replaceAll('`', '')}`)
       console.log(`  changed:  ${where(finding.changed)}`)
-      console.log(`  affected: ${where(finding.affected)}\n`)
+      if (finding.details) {
+        console.log(`  callers outside the PR (${finding.details.changeKinds.join(', ')}):`)
+        for (const caller of finding.details.callers) {
+          const status = caller.affected ? `affected${caller.confirmed ? '' : ', inferred link'}` : 'not affected'
+          console.log(`    ${where(caller.location)}  ${caller.location.symbol}  [${status}]${caller.reasons.length ? ` ${caller.reasons.join('; ').replaceAll('`', '')}` : ''}`)
+        }
+        console.log('')
+      } else {
+        console.log(`  affected: ${where(finding.affected)}\n`)
+      }
     }
   }
 } catch (error) {

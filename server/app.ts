@@ -81,7 +81,6 @@ export async function buildApp({ store, config, github, onEnqueued }: AppDeps) {
   app.get('/api/config', async () => ({
     githubTokenConfigured: Boolean(config.githubToken),
     webhookConfigured: Boolean(config.webhookSecret),
-    explanationModel: config.anthropicConfigured ? config.llmModel : null,
     localRepositories: [...config.localRepositories.keys()],
     maxDepth: config.maxDepth,
     versions: { parser: PARSER_VERSION, algorithm: ALGORITHM_VERSION },

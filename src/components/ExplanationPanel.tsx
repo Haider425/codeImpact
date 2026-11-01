@@ -1,4 +1,4 @@
-import { AlertTriangle, Bot, FileText, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, FileText } from 'lucide-react'
 import type { AnalysisResult } from '@/analysis/types'
 import type { StoredExplanation } from '@/lib/api'
 
@@ -7,12 +7,6 @@ interface ExplanationPanelProps {
   result: AnalysisResult
   onSelect: (symbolId: string) => void
   onOpenSource: (path: string, line: number, revision?: 'base' | 'head') => void
-}
-
-const statusCopy: Record<StoredExplanation['validationStatus'], string> = {
-  valid: 'Every claim validated against the evidence bundle',
-  repaired: 'Unsupported claims were removed during validation',
-  fallback: 'Deterministic template — no model output was used',
 }
 
 /** Bundle refs are positional: C1 is the first change, F1 the top-ranked finding, T1 the top-ranked test. */
@@ -27,7 +21,6 @@ function symbolForRef(ref: string, result: AnalysisResult) {
 export function ExplanationPanel({ explanation, result, onSelect, onOpenSource }: ExplanationPanelProps) {
   const { summary, affected, tests, uncertainty, bundle } = explanation.explanation
   const locations = new Map([...(bundle?.edges ?? []), ...(bundle?.unresolved ?? [])].map((item) => [item.ref, item]))
-  const isModel = explanation.modelIdentifier !== 'deterministic-template'
 
   const refButton = (refId: string) => {
     const symbolId = symbolForRef(refId, result)
@@ -47,10 +40,7 @@ export function ExplanationPanel({ explanation, result, onSelect, onOpenSource }
     <section className="explanation-block" aria-label="Impact explanation">
       <div className="explanation-heading">
         <span className="section-label">02 / EXPLANATION</span>
-        <span className={`validation-badge validation-badge--${explanation.validationStatus}`}>
-          {explanation.validationStatus === 'fallback' ? <FileText size={13} /> : <ShieldCheck size={13} />}
-          {explanation.validationStatus}
-        </span>
+        <span className="validation-badge"><FileText size={13} />deterministic</span>
       </div>
       <p className="explanation-summary">{summary.split('`').map((part, index) => (index % 2 ? <code key={index}>{part}</code> : part))}</p>
       {items.length > 0 && (
@@ -72,14 +62,8 @@ export function ExplanationPanel({ explanation, result, onSelect, onOpenSource }
         </div>
       )}
       <footer className="explanation-footer">
-        {isModel ? <Bot size={13} /> : <FileText size={13} />}
-        <span>{isModel ? explanation.modelIdentifier : 'template'} · {explanation.promptVersion} · {statusCopy[explanation.validationStatus]}</span>
-        {explanation.validationIssues.length > 0 && (
-          <details>
-            <summary>{explanation.validationIssues.length} validation note{explanation.validationIssues.length === 1 ? '' : 's'}</summary>
-            <ul>{explanation.validationIssues.map((issue) => <li key={issue}>{issue}</li>)}</ul>
-          </details>
-        )}
+        <FileText size={13} />
+        <span>Generated from the analysis results by a fixed template ({explanation.promptVersion}); no language model is involved.</span>
       </footer>
     </section>
   )

@@ -35,7 +35,7 @@ export interface StoredExplanation {
   }
   modelIdentifier: string
   promptVersion: string
-  validationStatus: 'valid' | 'repaired' | 'fallback'
+  validationStatus: 'template' | 'valid' | 'repaired' | 'fallback'
   validationIssues: string[]
   latencyMs: number
 }
@@ -53,7 +53,6 @@ export interface AnalysisReport {
 export interface ServerConfig {
   githubTokenConfigured: boolean
   webhookConfigured: boolean
-  explanationModel: string | null
   localRepositories: string[]
   maxDepth: number
   versions: { parser: string; algorithm: string }

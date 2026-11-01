@@ -4,6 +4,7 @@ type SyntaxNode = Parser.SyntaxNode
 import type {
   CallShape,
   EdgeRecord,
+  FunctionBehavior,
   ImportBinding,
   Parameter,
   ParseResult,
@@ -15,7 +16,7 @@ import type {
   UnresolvedRelationship,
 } from './types'
 
-export const PARSER_VERSION = 'ts-parser/3'
+export const PARSER_VERSION = 'ts-parser/4'
 
 let initPromise: Promise<void> | undefined
 const languageCache = new Map<string, Promise<Parser.Language>>()
@@ -116,7 +117,13 @@ function pythonParameters(list: SyntaxNode, source: string): Parameter[] {
     const hasDefault = child.type === 'default_parameter' || child.type === 'typed_default_parameter'
     const nameNode = hasDefault ? child.childForFieldName('name') : inner
     if (nameNode?.type !== 'identifier') continue
-    params.push({ name: text(nameNode, source), kind, required: !hasDefault })
+    const value = hasDefault ? child.childForFieldName('value') : null
+    const type = child.childForFieldName('type')
+    params.push({
+      name: text(nameNode, source), kind, required: !hasDefault,
+      ...(value ? { default: squash(text(value, source)) } : {}),
+      ...(type ? { type: squash(text(type, source)) } : {}),
+    })
   }
   return params
 }
@@ -131,10 +138,75 @@ function typescriptParameters(list: SyntaxNode, source: string): Parameter[] {
       params.push({ name: text(pattern, source).replace(/^\.\.\./, ''), kind: 'var-positional', required: false })
       continue
     }
-    const required = child.type === 'required_parameter' && !child.childForFieldName('value')
-    params.push({ name: text(pattern, source), kind: 'positional', required })
+    const value = child.childForFieldName('value')
+    const type = child.childForFieldName('type')
+    const required = child.type === 'required_parameter' && !value
+    params.push({
+      name: text(pattern, source), kind: 'positional', required,
+      ...(value ? { default: squash(text(value, source)) } : {}),
+      ...(type ? { type: squash(text(type, source).replace(/^:\s*/, '')) } : {}),
+    })
   }
   return params
+}
+
+function squash(value: string) {
+  return value.replace(/\s+/g, ' ').trim()
+}
+
+const FUNCTION_BOUNDARIES = new Set([
+  'function_definition', 'lambda', 'function_declaration', 'function_expression', 'function', 'arrow_function',
+  'method_definition', 'class_definition', 'class_declaration', 'generator_function_declaration',
+])
+
+/** Descendants of `node` that belong to it, not to nested functions or classes. */
+function ownDescendants(node: SyntaxNode) {
+  const result: SyntaxNode[] = []
+  const stack = [...node.children]
+  while (stack.length > 0) {
+    const current = stack.pop()!
+    if (FUNCTION_BOUNDARIES.has(current.type)) continue
+    result.push(current)
+    stack.push(...current.children)
+  }
+  return result
+}
+
+function raisedType(node: SyntaxNode, source: string) {
+  const value = node.namedChildren.find((child) => child.type !== 'comment')
+  if (!value) return '<re-raise>'
+  const target = value.type === 'call' ? value.childForFieldName('function')
+    : value.type === 'new_expression' ? value.childForFieldName('constructor')
+      : value
+  return squash(text(target ?? value, source))
+}
+
+function behaviorOf(definition: SyntaxNode, file: SourceFile): FunctionBehavior | undefined {
+  const fn = definition.type === 'variable_declarator' ? definition.childForFieldName('value') : definition
+  const body = fn?.childForFieldName('body')
+  if (!fn || !body) return undefined
+  const returnType = fn.childForFieldName('return_type')
+  const behavior: FunctionBehavior = {
+    returns: [],
+    raises: [],
+    ...(returnType ? { returnType: squash(text(returnType, file.source).replace(/^:\s*/, '')) } : {}),
+  }
+  if (fn.type === 'arrow_function' && body.type !== 'statement_block') {
+    behavior.returns.push(squash(text(body, file.source)))
+    return behavior
+  }
+  for (const node of ownDescendants(body)) {
+    if (node.type === 'return_statement') {
+      behavior.returns.push(squash(text(node, file.source).replace(/^return\b/, '').replace(/;$/, '')) || '<none>')
+    } else if (node.type === 'yield' || node.type === 'yield_expression') {
+      behavior.returns.push(squash(text(node, file.source)))
+    } else if (node.type === 'raise_statement' || node.type === 'throw_statement') {
+      behavior.raises.push(raisedType(node, file.source))
+    }
+  }
+  behavior.returns.sort()
+  behavior.raises = [...new Set(behavior.raises)].sort()
+  return behavior
 }
 
 function parametersOf(definition: SyntaxNode, file: SourceFile): Parameter[] | undefined {
@@ -171,7 +243,7 @@ function declaration(
     source,
     signature,
     resolutionStatus: 'resolved',
-    ...(kind === 'function' || kind === 'method' ? { params: parametersOf(definition, file) } : {}),
+    ...(kind === 'function' || kind === 'method' ? { params: parametersOf(definition, file), behavior: behaviorOf(definition, file) } : {}),
     ...(file.language === 'python' && kind !== 'file' ? { decorators: decoratorsOf(definition, file.source) } : {}),
   }
 }
@@ -690,7 +762,38 @@ function callShape(call: SyntaxNode, calleeNode: SyntaxNode, method: string, sou
   const receiver: CallShape['receiver'] = calleeNode.type === 'identifier' || method === 'module attribute'
     ? 'none'
     : method === 'class member lookup' ? 'unbound' : 'bound'
-  return { positional, keywords, spread, receiver }
+  return { positional, keywords, spread, receiver, resultUsed: resultUsed(call), caught: caughtAround(call, source) }
+}
+
+function resultUsed(call: SyntaxNode) {
+  let node = call
+  while (node.parent && ['await', 'await_expression', 'parenthesized_expression'].includes(node.parent.type)) node = node.parent
+  return node.parent?.type !== 'expression_statement'
+}
+
+const CATCH_ALL = new Set(['Exception', 'BaseException'])
+
+/** Exceptions caught around a call by `try` blocks inside the same function. */
+function caughtAround(call: SyntaxNode, source: string): string[] | null {
+  let caught: string[] | null = null
+  let child = call
+  for (let node = call.parent; node && !FUNCTION_BOUNDARIES.has(node.type); child = node, node = node.parent) {
+    if (node.type !== 'try_statement' || node.childForFieldName('body')?.startIndex !== child.startIndex) continue
+    caught ??= []
+    if (node.childForFieldName('handler')) caught.push('*') // JS/TS catch clauses catch everything
+    for (const clause of node.namedChildren.filter((candidate) => candidate.type === 'except_clause' || candidate.type === 'except_group_clause')) {
+      const header = clause.namedChildren[0]
+      if (!header || header.type === 'block') {
+        caught.push('*')
+        continue
+      }
+      const types = header.type === 'as_pattern' ? header.namedChildren[0] : header
+      for (const name of text(types ?? header, source).match(/[A-Za-z_][\w.]*/g) ?? []) {
+        caught.push(CATCH_ALL.has(name) ? '*' : name)
+      }
+    }
+  }
+  return caught && [...new Set(caught)]
 }
 
 function linkCalls(scope: ModuleScope, index: RevisionIndex) {

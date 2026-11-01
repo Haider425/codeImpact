@@ -7,8 +7,7 @@ import type { AnalysisResult, SourceFile, SymbolRecord } from '../src/analysis/t
 import type { Config } from './config'
 import type { RunRow, RunStatus, Store } from './db'
 import { AnalysisError, toAnalysisError } from './errors'
-import { AnthropicExplanationProvider, buildEvidenceBundle, explainAnalysis } from './explain'
-import type { ExplanationProvider } from './explain'
+import { buildEvidenceBundle, explainAnalysis } from './explain'
 import { loadRepositoryRevisions, mergeBase as localMergeBase, resolveCommit } from './git'
 import type { ChangedFile } from './git'
 import { GitHubClient } from './github'
@@ -85,13 +84,11 @@ const stageStatus: Partial<Record<AnalysisStage, RunStatus>> = {
 
 export interface PipelineDeps {
   github: GitHubClient
-  explainer?: ExplanationProvider
 }
 
 export function defaultDeps(config: Config): PipelineDeps {
   return {
     github: new GitHubClient(config.githubToken),
-    explainer: config.anthropicConfigured ? new AnthropicExplanationProvider(config.llmModel) : undefined,
   }
 }
 
@@ -152,7 +149,7 @@ export async function runJob(store: Store, run: RunRow, config: Config, deps: Pi
       number: run.pull_request_number ?? 0,
       title: run.pull_request_title ?? '',
     })
-    const explanation = await explainAnalysis(bundle, deps.explainer)
+    const explanation = explainAnalysis(bundle)
     store.saveExplanation(run.id, {
       structuredOutput: { ...explanation.explanation, bundle },
       modelIdentifier: explanation.modelIdentifier,

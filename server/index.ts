@@ -16,7 +16,6 @@ await app.listen({ port: config.port, host: config.host })
 log('info', 'server listening', {
   url: `http://${config.host}:${config.port}`,
   worker: worker ? 'inline' : 'external',
-  explanations: config.anthropicConfigured ? config.llmModel : 'deterministic template',
   githubToken: Boolean(config.githubToken),
   localRepositories: [...config.localRepositories.keys()],
 })

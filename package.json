@@ -17,7 +17,6 @@
     "review": "tsx server/review-cli.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^1.3.0",
     "@dagrejs/dagre": "^3.1.3",
     "@fastify/static": "^8.3.0",
     "@fontsource-variable/geist-mono": "^5.3.0",
