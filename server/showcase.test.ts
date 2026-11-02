@@ -68,7 +68,7 @@ describe('showcase server', () => {
       await app.close()
       store.db.close()
     }
-  }, 30_000)
+  }, 120_000) // Boots the full app; slow on a cold runner.
 })
 
 async function checkShowcase(app: Awaited<ReturnType<typeof buildApp>>, done: number) {

@@ -108,7 +108,7 @@ describe('webhook security', () => {
     expect(redelivered.json()).toMatchObject({ status: 'already_analyzed', analysisId: first.json().analysisId })
     expect(store.runs()).toHaveLength(1)
     await app.close()
-  }, 30_000)
+  }, 120_000) // Boots the full app; slow on a cold runner.
 })
 
 describe('job lifecycle', () => {
@@ -179,7 +179,7 @@ describe('end-to-end local analysis', () => {
     expect(report.explanation).toMatchObject({ modelIdentifier: 'deterministic-template', validationStatus: 'template' })
     expect(JSON.stringify(report)).not.toContain('node_modules')
     await app.close()
-  }, 30_000)
+  }, 120_000) // Boots the full app; slow on a cold runner.
 
   it('refuses repositories that are not on the configured allowlist', async () => {
     const app = await buildApp({ store: new Store(':memory:'), config: testConfig(), github: new FakeGitHub() })

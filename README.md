@@ -1,14 +1,14 @@
 # CodeImpact
 
-**CodeImpact** is a deterministic static-analysis and dependency-mapping engine for reviewing pull requests in Python and TypeScript repositories. It finds the symbols a pull request changed, traces their callers across files through a static dependency graph, and flags breakage in code the diff does not show. It also ranks the tests worth running. Every finding comes with inspectable evidence: the changed location, the affected location, and the dependency edges between them.
+**CodeImpact is an impact-aware pull request reviewer. It catches the breakages a pull request causes outside its own diff.** Most reviewers read the changed lines. CodeImpact parses the base and head revisions of a Python or TypeScript repository and finds every symbol the pull request changed. It then follows their callers through a static dependency graph and checks those callers against the new contract: signatures, removed or renamed symbols, broken imports, return values and raised exceptions. It can also run the project's type checker and the impacted tests, keeping only errors and failures that are new on the PR head. Evidence pointing at the same caller is merged into one finding, posted as a single pull request comment that is edited in place on every push. It is deterministic and runs without a language model or any paid service.
 
-By default, repository code is parsed with Tree-sitter and never executed; all source is treated as untrusted text. Running the project's type checker and its impacted tests is opt-in, and happens in an isolated, read-only job.
+![CodeImpact review comment on a demo pull request: one high-severity finding in src/cart.ts, backed by a rule, the type checker and two failing tests](docs/images/demo-pr-comment.png)
 
-The full product spec is in [codeImpact_mvp.md](codeImpact_mvp.md).
+*The comment on [codeimpact-demo#1](https://github.com/Haider425/codeimpact-demo/pull/1). The pull request adds a required parameter to `applyDiscount()` in `src/pricing.ts` and does not update its caller in `src/cart.ts`, which is not in the diff. A rule, `tsc`, and two `checkout` tests that pass on `main` all point at the same line.*
 
-## GitHub Action
+## Add it to a repository
 
-Add `.github/workflows/codeimpact.yml` to the repository you want reviewed:
+Create `.github/workflows/codeimpact.yml`:
 
 ```yaml
 name: CodeImpact
@@ -35,7 +35,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - uses: Haider425/codeImpact/actions/analyze@review-layer
+      - uses: Haider425/codeImpact/actions/analyze@v0.1.0
         with:
           install-command: npm ci     # or: pip install -e ".[test]"
           typecheck: true             # optional, off by default
@@ -49,153 +49,139 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      - uses: Haider425/codeImpact/actions/comment@review-layer
+      - uses: Haider425/codeImpact/actions/comment@v0.1.0
         with:
           fail-on-high: false         # true fails the check when high-severity findings exist
 ```
 
-The comment is posted once and edited in place on every push. A finished example is the demo repository described in [Trying it end to end](#trying-it-end-to-end).
+The analyzer needs Node 22.12 or newer on the runner, which `setup-node` provides. Python projects also need Python; pyright is installed automatically when `typecheck` is on.
 
 **`actions/analyze` inputs**
 
 | Input | Default | |
 |---|---|---|
 | `install-command` | none | Installs the project's dependencies. Needed for type checks and test runs. |
-| `typecheck` | `false` | Run `tsc` (needs a `tsconfig.json`) or pyright (needs a pyright or mypy config) on base and head. pyright is installed automatically for Python projects. |
-| `run-tests` | `false` | Run the top-ranked impacted tests with pytest, vitest, or jest, and re-run failures on base. |
+| `typecheck` | `false` | Run `tsc` (needs a `tsconfig.json`) or pyright (needs a pyright or mypy config) on base and head, and report only new errors in code the PR did not change. |
+| `run-tests` | `false` | Run the top-ranked impacted tests with pytest, vitest or jest. Failures are re-run on the base revision, and only tests that pass there are reported. |
 | `max-tests` | `20` | Upper bound on impacted tests to run. |
 | `timeout-seconds` | `300` | Time limit for each type-check or test run. |
 | `base`, `head` | PR base and head SHAs | Commit range to analyze; the diff starts at their merge base. |
 
-**`actions/comment` inputs:** `fail-on-high` (default `false`), `show-low-severity` (default `false`; low-severity findings are counted but not listed, because on real pull requests they were mostly noise), `github-token` (default: the workflow token), `dry-run` (render to the log and job summary only).
+**`actions/comment` inputs:**
 
-**Security model**
+- `fail-on-high` (default `false`).
+- `show-low-severity` (default `false`). Low-severity findings are counted but not listed, because on real pull requests they were almost all noise (see below).
+- `github-token` (default: the workflow token).
+- `dry-run`: render to the log and the job summary only.
 
-- The analyze job runs your install command and, if enabled, your tests, so it gets `contents: read` and nothing else. Checkout uses `persist-credentials: false`. Type checkers and tests run in a temporary copy of each revision, with an environment that drops tokens and secrets, under a hard time limit.
-- The comment job holds `pull-requests: write`. It downloads the report artifact and runs one dependency-free script; it never checks out or executes the pull request's code.
-- The report artifact comes from a job that ran repository code, so the comment step treats it as untrusted input. It validates every field, escapes HTML and markdown, neutralizes `@mentions`, URLs, and `#123` references, truncates long output, and builds links only from validated paths and from the repository name and commit SHAs in the trusted event payload.
-- Do not trigger this workflow from `pull_request_target`.
-- Fork pull requests get a read-only token, so the comment step writes the results to the job summary instead of commenting.
-- Third-party actions are referenced by major tag (`@v4`). Pin them to commit SHAs if your policy requires it.
+**Security model.**
 
-This repository reviews its own pull requests with [.github/workflows/codeimpact.yml](.github/workflows/codeimpact.yml). There, the comment job checks out the comment action from the PR's base commit, so a pull request cannot change the code that holds the write token. As a result, the comment job fails on the first pull request that adds the action, because the base commit does not contain it yet.
+- **Static analysis** never executes repository code; it parses source as untrusted text.
+- **Analyze job.** The opt-in type-check and test-run evidence does execute repository code: your dependency install and your tests. So this job gets `contents: read` and no write token, and checks out with `persist-credentials: false`. Type checkers and tests run in a temporary copy of each revision, with an environment stripped of tokens and secrets and a hard time limit.
+- **Comment job.** It holds `pull-requests: write`, never checks out or executes the pull request's code, and runs one dependency-free script.
+- **Report artifact.** It comes from a job that ran repository code, so the comment step treats it as untrusted. It validates every field, escapes HTML and markdown, and neutralizes `@mentions`, URLs and `#123` references. It also truncates long output, and builds links only from validated paths and the commit SHAs in the trusted event payload.
+- **Trigger.** Do not use `pull_request_target`. Fork pull requests get a read-only token, so for them the results go to the job summary instead of a comment.
 
-### Trying it end to end
+This repository reviews its own pull requests with the same actions, pinned to `v0.1.0`, in [.github/workflows/codeimpact.yml](.github/workflows/codeimpact.yml).
 
-A demo project lives outside this repository at `codeimpact-demo` (a sibling folder). Its `main` branch is a small TypeScript pricing module with passing tests. Its `break-discount` branch adds a required parameter to `applyDiscount()` without updating the caller in `src/cart.ts`. A pull request from `break-discount` produces three high-severity findings: a rule finding (missing argument), a type-checker finding (`tsc` TS2554 in `src/cart.ts`), and two impacted `checkout` tests that pass on `main` and fail on the PR.
+## Benchmark
 
-To run the same steps locally without GitHub:
+The full method, per-bug-type tables, the real-PR spot-check and every limitation are in [benchmark/REPORT.md](benchmark/REPORT.md). Reproduce it with `npm run bench`.
 
-```bash
-npm run review -- --repo ../codeimpact-demo --base main --head break-discount --typecheck --run-tests --output report.json
-GITHUB_REPOSITORY=you/codeimpact-demo INPUT_REPORT_PATH=report.json INPUT_DRY_RUN=true node actions/comment/comment.mjs
+The benchmark injects one breaking change at a time into three real repositories: pallets/itsdangerous, pallets/click and unjs/ufo. The break types are a new required parameter, a rename, a deletion, a changed return shape, and a newly raised exception. A text-based oracle, independent of CodeImpact's parser, marks every call site the change breaks. The only tuned setting, the severity threshold, was chosen on a separate tuning split.
+
+**Held-out injected cases (n = 45, threshold `medium`)**
+
+| Mode | Cases detected | Case recall (95% CI) | Location recall | Precision | False positives per case | Median runtime |
+|---|---|---|---|---|---|---|
+| Diff-only, rules | 9/45 | 20% (11–34%) | 5% | 100% | 0.00 | 0.6 s |
+| Diff-only, rules + type checker + tests | 19/45 | 42% (29–57%) | 5% | 100%¹ | 0.00 | 8.9 s |
+| Impact, rules | 35/45 | 78% (64–87%) | 75% | 100% | 0.00 | 0.6 s |
+| Impact, rules + type checker | 36/45 | 80% (66–89%) | 75% | 100% | 0.00 | 7.4 s |
+| Impact, rules + type checker + tests | 45/45 | 100% (92–100%) | 75% | 100% | 0.02 | 8.9 s |
+
+<sub>¹ The diff-only type checker also reports 21 errors inside the changed file at lines that are not call sites, such as the changed function's own `return` statements. They are counted as correct here. Under strict scoring, which counts only oracle locations, the mode detects 9/45 cases at 38% precision.</sub>
+
+**Read the table with these caveats.**
+
+- **The breaks are injected, and only into functions that have callers.** Targets were picked by a fixed hash, not by hand. But the selection requires at least one call site, because a break with no caller cannot be measured, and 222 of the 241 broken locations are outside the changed file. This setup measures exactly what CodeImpact is built for. Real regressions are subtler.
+- **Diff-only is an ablation of CodeImpact, not a product comparison.** It is the same run with findings restricted to the changed files. No other review tool, CodeRabbit included, was run, so these numbers say nothing about how CodeImpact compares with one.
+- **Detecting a case is not finding every break.** Impact mode flags at least one correct location in 45 of 45 cases, but **location recall is 75%** (181 of 241 broken call sites). Return-shape and raise changes are mostly caught through failing tests rather than by locating every caller.
+- **The precision on real pull requests is poor.** On 36 real merged pull requests, CodeImpact produced no medium or high findings, but it did produce 13 low-severity ones. A manual spot-check found **1 of the 13 real (8%)**. That is why the PR comment hides low severity by default. The one real finding, a behaviour change in [unjs/ufo#286](https://github.com/unjs/ufo/pull/286), was rated low and so would not have been surfaced.
+- **The samples are small.** There are 45 held-out cases over three small repositories, so read the intervals, not the point estimates.
+
+## How it works
+
+```
+pull request (base, head)
+  └─ merge base + head read from git objects
+      └─ parse both revisions with Tree-sitter (Python, TS, TSX)         src/analysis/parser.ts
+          └─ symbols, parameters, returns, raises, calls, imports
+              └─ diff symbols: signature, body, rename, delete, module    src/analysis/engine.ts
+                  └─ reverse call graph → callers outside the diff (BFS)
+                      ├─ contract rules on each affected caller            src/analysis/review.ts
+                      ├─ type checker on base and head, new errors only    server/evidence/
+                      └─ impacted tests on head, failures re-run on base   server/evidence/
+                          └─ merge evidence by affected location → severity
+                              └─ one PR comment, edited in place           actions/comment/
 ```
 
-## Quick start
+- **Rules are deterministic.** `signature/*` checks each caller's arguments against the new parameters. `reference/*` covers removed or renamed symbols and imports that no longer resolve. `impact/unupdated-caller` groups callers outside the PR whose callee changed its return value, return type, raised exceptions, defaults or parameter types. Return and raise comparisons work on syntax trees, and exception changes follow class inheritance, so a caller that already catches a base class is not flagged.
+- **Every edge carries provenance**: the file, line, revision and how it was resolved. `resolved` means confirmed through a declaration or import. `inferred` means matched by method name when the receiver type is unknown, and findings on inferred edges are marked as such.
+- **Evidence is merged by affected location.** Rule, type-checker and failing-test evidence that point at the same caller become one finding. A failing test joins the finding whose caller lies on its dependency path, and the finding takes the severity of its strongest evidence.
+- **The static analysis never executes code.** Repository source is parsed as untrusted text. The opt-in type-check and test-run evidence does execute repository code: the install command, the type checker's project configuration and the tests. That happens only in the separate analyze job, which has a read-only token and no write access.
 
-Prerequisites: Node.js 22.12 or newer (CI uses 24), and git.
+## Limitations
+
+- **Python and TypeScript only.** Calls through `getattr`, callbacks passed by reference, dependency injection or string dispatch are invisible to the graph. tsconfig `paths` aliases and pytest fixture links are not resolved.
+- **Name-based method resolution can pick the wrong class** when the receiver's type is unknown.
+- **Location recall is 75% on injected breaks.** When a change alters a return value or raises a new exception, the type checker and tests usually catch the case, but not every affected caller is located.
+- **Low-severity findings are mostly noise**, at 1 real in 13 on real pull requests. They are hidden from the comment by default.
+- **Severity can be under-rated.** A real change to a returned value can be labelled "internals only" and rated low.
+- **The evidence is only as good as the project's own setup.** Type checks need a `tsconfig.json` or a pyright/mypy config, and tests need an install command that works on a clean runner.
+- **The benchmark is small and synthetic**, as described above.
+
+## Planned fixes
+
+These come from the real-PR spot-check, ordered by how many false positives each pattern caused. They are deliberately not fixed yet: changing the rules against cases that have already been seen would turn the held-out set into tuning data. They will be fixed together and measured on new cases.
+
+1. Stop emitting a finding when the analysis itself concludes that no caller is affected.
+2. Ignore comment and docstring edits when deciding whether a symbol changed.
+3. Compare how a returned value is built, not just the `return` expressions, so return-value changes are not labelled "internals only".
+4. Stop name-based method resolution from picking the wrong class.
+5. Stop treating `Protocol` signatures as runtime contracts.
+
+Weaknesses the injected cases exposed, deferred for the same reason:
+
+- `impact/unupdated-caller` ignores unchanged callers in the same file as the change.
+- A parameter inserted before a default or rest parameter passes the arity checks, so only the type checker or tests catch it.
+- When a rename or delete breaks test collection itself, the test run reports an environment problem instead of a finding. The broken-import rule still catches these cases.
+
+## Running it locally
+
+Prerequisites: Node.js 22.12 or newer, and git.
 
 ```bash
 git clone https://github.com/Haider425/codeImpact.git
 cd codeImpact
 npm install
-npm run server      # API + inline worker on http://127.0.0.1:8787
-npm run dev         # web UI on http://localhost:3000 (proxies /api to the server)
+
+# Review a commit range or a public pull request from the terminal
+npm run review -- --repo ../some-repo --base main --head my-branch --typecheck --run-tests
+npm run review -- https://github.com/pallets/itsdangerous/pull/428
+
+# Render the PR comment from a saved report without posting it
+npm run review -- --repo ../some-repo --base main --head my-branch --output report.json
+GITHUB_REPOSITORY=you/some-repo INPUT_REPORT_PATH=report.json INPUT_DRY_RUN=true node actions/comment/comment.mjs
 ```
 
-Open the UI and paste a public pull-request URL, such as `https://github.com/pallets/itsdangerous/pull/428`. The **Offline demo** link runs the bundled fixture entirely in the browser, with no server.
+The repository also contains a web UI that shows the same findings next to the dependency map, the evidence and the source. Run `npm run server` and `npm run dev`, then open http://localhost:3000. Use `--store` with `npm run review` to save a result for it. `CODEIMPACT_SHOWCASE=1 npm run server` serves a read-only showcase of exported reports; see `npm run showcase:export -- --list`. The server has no authentication, so keep it bound to `127.0.0.1`.
 
-For a production-style single process, run `npm run build && npm run server`. The server also serves `dist/`.
-
-Configuration lives in environment variables; see [.env.example](.env.example). Nothing is required. A `GITHUB_TOKEN` raises rate limits and allows private repositories. CodeImpact uses no language model and no paid service.
-
-## How it works
-
-```
-GitHub PR / local range
-  └─ fetch merge-base + head (shallow, bare cache, no checkout)      server/github.ts, server/git.ts
-      └─ parse both revisions with tree-sitter (Python, TS, TSX)       src/analysis/parser.ts
-          └─ resolve imports & calls → typed, evidence-carrying edges
-              └─ diff symbols (body, signature, rename, module-level)   src/analysis/engine.ts
-                  └─ BFS over reverse call edges, depth-limited
-                      └─ rank findings + tests (documented weights)
-                          └─ bounded evidence bundle → explanation      server/explain.ts
-                              └─ validate every reference, else template
-```
-
-- **Edges carry provenance**: file, line, revision, extraction method, and a resolution status. `resolved` means confirmed through a declaration or import. `inferred` means matched by method name when the receiver type is unknown, including small override families. Calls that can't be resolved safely are listed, not dropped.
-- **Ranking** (`RANKING_WEIGHTS` in `src/analysis/engine.ts`): 45% proximity, 20% direct link, 10% resolution, 10% test link, 10% fan-in, 5% exported API. Tests changed in the PR score 100. Tests linked only by a file import score 15. Scores order review priority; they are not failure probabilities.
-- **Findings are merged by affected location.** Rule, type-checker, and failing-test evidence that point at the same caller become one finding. A failing test joins the finding whose caller lies on its dependency path. The finding's severity is that of its strongest evidence. The PR comment, the CLI, and the report page all show these merged findings, with the source of each piece of evidence.
-- **Explanations** are generated by a fixed template from the analysis results. Every sentence cites refs that exist in the evidence bundle; no language model is involved.
-- **Jobs** follow `queued → fetching → parsing → graphing → ranking → explaining → completed | failed`. Runs are deduplicated by repository, PR, commits, and engine version. Transient failures retry with backoff, and runs abandoned by a crashed worker are recovered. Webhook deliveries are HMAC-verified and deduplicated by delivery ID.
-
-### Core modules
-
-- `src/analysis/parser.ts`: Tree-sitter (WASM) parsing for Python and TypeScript. Extracts symbols, parameters, return and raise behaviour, call shapes, and import bindings, and resolves calls to declarations.
-- `src/analysis/engine.ts`: diffs symbols between base and head, builds the dependency graph, and ranks impacted symbols and tests by shortest caller path.
-- `src/analysis/review.ts`: deterministic review rules (signature contracts, removed or renamed symbols, broken imports, grouped unupdated callers). Exception inheritance lives in `src/analysis/exceptions.ts`.
-- `server/evidence/`: opt-in type-checker and impacted-test runs, isolated in temporary copies.
-- `server/review-cli.ts`: the reviewer CLI that the GitHub Action runs.
-- `actions/analyze`, `actions/comment`: the GitHub Action.
-- `server/eval/`: the benchmark harness behind `npm run bench`.
-
-## API
-
-| Method | Path | |
-|---|---|---|
-| GET | `/api/config` | Server capabilities and versions |
-| POST | `/api/analyses` | `{ "pullRequest": "owner/repo#12" }` → 202 `{ id }` (200 if deduplicated) |
-| POST | `/api/local-analyses` | `{ repository, base, head }` for allow-listed local checkouts |
-| GET | `/api/analyses`, `/api/analyses/:id` | History and status with stage timings |
-| GET | `/api/analyses/:id/report` | Findings, tests, graph, evidence files, explanation |
-| GET | `/api/analyses/:id/findings` · `/tests` · `/graph` | Slices of the report |
-| POST | `/api/analyses/:id/retry` | Re-queue a failed run |
-| GET | `/api/github/:owner/:repo/pull-requests` | Open PRs |
-| GET/DELETE | `/api/repositories[/:id[/connection]]` | Connected repositories |
-| POST | `/api/webhooks/github` | `pull_request` opened / synchronize / reopened |
-
-## Scripts
-
-| | |
+| Script | |
 |---|---|
-| `npm test` | Engine, resolution, server, and security tests (the benchmark test runs when a clone exists) |
-| `npm run bench` | Clones `pallets/itsdangerous` and writes `benchmark/REPORT.md` and `results.json` |
-| `npm run typecheck` · `npm run lint` | |
-| `npm run worker` | Standalone worker; use with `CODEIMPACT_WORKER=external` |
-| `npm run review -- <PR or --repo …>` | Review one pull request or commit range from the terminal. `--typecheck` and `--run-tests` add evidence, `--store` saves the result for the web UI, and `--as owner/repo#N` labels a local checkout with its public pull request. |
-| `npm run showcase:export -- --ids 2,3` | Copy selected completed analyses into `data/showcase.db`. `--list` shows what is available. Analyses of local checkouts need `--allow-local`, because their stored source files would be published. |
+| `npm test` | Engine, rules, evidence, server, action and security tests |
+| `npm run typecheck` · `npm run lint` · `npm run build` | |
+| `npm run bench` | The benchmark above. Clones each repository, runs the cases, deletes the clone, and writes `benchmark/REPORT.md` |
+| `npm run review` | The reviewer CLI that the GitHub Action runs |
 
-### Showcase mode
-
-`CODEIMPACT_SHOWCASE=1 npm run server` serves `data/showcase.db` (or `CODEIMPACT_DB`) read-only. It runs no worker, and every write endpoint returns 403, as does the GitHub proxy. The dashboard hides the analysis forms. A typical flow:
-
-1. Store analyses with `npm run review -- … --store`.
-2. Pick the ones to publish with `npm run showcase:export -- --list`, then export them with `npm run showcase:export -- --ids …`.
-3. Deploy with `CODEIMPACT_SHOWCASE=1`.
-
-Hosting is not set up yet.
-
-## Status against the MVP spec
-
-Done:
-
-- Python and TypeScript/TSX parsing. Import resolution covers relative imports, `src/` layouts, package re-exports, TS barrels, and default and namespace imports. Call resolution covers `self`/`this` methods, constructors, and module attributes.
-- Change detection: body, signature, rename, deleted, added, module-level, and decorator changes. `@overload` stubs are skipped.
-- Depth-limited BFS impact analysis with direct/transitive labels and evidence paths.
-- Test recommendations with connection type, reasons, and limitations.
-- Four baselines plus the graph strategy, with recall, reduction, and precision@K metrics, and a reproducible benchmark with a tune/holdout split.
-- GitHub PR ingestion at the merge base with resource limits, and local git ranges.
-- SQLite persistence, job queue, worker, retries, stale-job recovery, and deduplication.
-- Webhook endpoint with HMAC verification and delivery deduplication.
-- Deterministic explanations built from the evidence bundle.
-- Web UI: dashboard, history, live progress, report, dependency map, evidence inspector, source viewer, baselines, and export.
-
-Not done yet:
-
-- **GitHub sign-in and per-user repository authorization.** There is no auth today, so keep the server bound to `127.0.0.1` and don't expose it with a token that can read private repositories.
-- A GitHub App installation flow, plus Checks and inline annotations (P1).
-- Postgres and Redis. SQLite covers both storage and the queue for now; the schema follows the spec's tables, with findings stored as JSON per run.
-- pytest fixture and inheritance linking, and tsconfig `paths` aliases.
-- A larger labelled benchmark. Four commits is a harness, not evidence.
-- API rate limiting.
-- Deployment config (Docker, CI) and centralized monitoring.
+The original product spec is in [codeImpact_mvp.md](codeImpact_mvp.md).
