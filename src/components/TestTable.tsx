@@ -33,7 +33,7 @@ export function TestTable({ tests, onInspect, onOpenSource }: TestTableProps) {
                   {recommendation.test.path}:{recommendation.test.startLine}
                 </button>
               </td>
-              <td>{recommendation.path.edgeIds.length === 1 ? 'Direct call' : `${recommendation.path.edgeIds.length} edges`}</td>
+              <td>{recommendation.connection === 'changed' ? 'Changed in PR' : recommendation.connection === 'file-import' ? 'File import only' : recommendation.path.edgeIds.length === 1 ? 'Direct call' : `${recommendation.path.edgeIds.length} edges`}</td>
               <td><strong className="table-score">{recommendation.score}</strong><span className="score-denominator">/100</span></td>
               <td><span className="recommendation-status">Recommended</span></td>
               <td><button type="button" className="icon-action" aria-label={`Inspect evidence for ${recommendation.test.name}`} onClick={() => onInspect(recommendation.test.id)}><ArrowRight size={16} /></button></td>

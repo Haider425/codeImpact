@@ -57,8 +57,14 @@ interface ImpactGraphProps {
   expanded?: boolean
 }
 
+/** The default view: changed symbols, the highest-ranked impact and tests, and the paths between them. */
+const TOP_FINDINGS = 12
+const TOP_TESTS = 8
+type GraphFilter = 'top' | 'all' | 'changed' | 'tests'
+const FILTER_LABELS: Record<GraphFilter, string> = { top: 'Top', all: 'All', changed: 'Changes', tests: 'Tests' }
+
 export function ImpactGraph({ result, selectedId, onSelect, expanded = false }: ImpactGraphProps) {
-  const [filter, setFilter] = useState<'all' | 'changed' | 'tests'>(() => window.matchMedia('(max-width: 560px)').matches ? 'changed' : 'all')
+  const [filter, setFilter] = useState<GraphFilter>(() => window.matchMedia('(max-width: 560px)').matches ? 'changed' : 'top')
   const changedIds = useMemo(() => new Set(result.changes.filter((change) => change.head).map((change) => change.symbolId)), [result])
   const findingById = useMemo(() => new Map(result.findings.map((finding) => [finding.symbol.id, finding])), [result])
   const testIds = useMemo(() => new Set(result.tests.map((test) => test.test.id)), [result])
@@ -71,12 +77,29 @@ export function ImpactGraph({ result, selectedId, onSelect, expanded = false }: 
     return new Set(item?.path.edgeIds ?? [])
   }, [result, selectedId])
 
+  const graphSize = result.graphSymbolIds.length
   const visibleIds = useMemo(() => {
-    const all = new Set(result.graphSymbolIds)
-    if (filter === 'changed') return new Set([...changedIds])
-    if (filter === 'tests') return new Set([...changedIds, ...testIds])
-    return all
-  }, [filter, result, changedIds, testIds])
+    let ids: string[]
+    if (filter === 'all') ids = result.graphSymbolIds
+    else if (filter === 'changed') ids = [...changedIds]
+    else if (filter === 'tests') ids = [...changedIds, ...testIds]
+    else {
+      const topFindings = [...result.findings].sort((a, b) => a.rank - b.rank).slice(0, TOP_FINDINGS)
+      const topTests = result.tests.filter((test) => test.connection !== 'file-import').slice(0, TOP_TESTS)
+      ids = [
+        ...changedIds,
+        ...topFindings.flatMap((finding) => finding.path.nodeIds),
+        ...topTests.flatMap((test) => test.path.nodeIds),
+      ]
+    }
+    // Whatever is selected stays visible with its path, even outside the current filter.
+    const selected = result.findings.find((finding) => finding.symbol.id === selectedId) ?? result.tests.find((test) => test.test.id === selectedId)
+    if (selectedId) ids = [...ids, selectedId, ...(selected?.path.nodeIds ?? [])]
+    return new Set(ids.filter((id) => {
+      const symbol = symbolById.get(id)
+      return symbol && symbol.kind !== 'file'
+    }))
+  }, [filter, result, changedIds, testIds, selectedId, symbolById])
 
   const { nodes, edges } = useMemo(() => {
     const visibleEdges = result.edges.filter((edge) => edge.type === 'calls' && visibleIds.has(edge.source) && visibleIds.has(edge.target))
@@ -108,12 +131,12 @@ export function ImpactGraph({ result, selectedId, onSelect, expanded = false }: 
       <div className="graph-toolbar">
         <div>
           <span className="section-label">IMPACT MAP</span>
-          <span className="graph-count">{nodes.length} nodes · {edges.length} visible edges</span>
+          <span className="graph-count">{nodes.length === graphSize ? `${nodes.length} nodes` : `${nodes.length} of ${graphSize} nodes`} · {edges.length} visible edges</span>
         </div>
         <div className="segmented-control" aria-label="Filter graph nodes">
-          {(['all', 'changed', 'tests'] as const).map((value) => (
+          {(['top', 'all', 'changed', 'tests'] as const).map((value) => (
             <button key={value} type="button" className={filter === value ? 'active' : ''} onClick={() => setFilter(value)}>
-              {value === 'all' ? 'All' : value === 'changed' ? 'Changes' : 'Tests'}
+              {FILTER_LABELS[value]}
             </button>
           ))}
         </div>

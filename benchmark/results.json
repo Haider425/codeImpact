@@ -1,0 +1,614 @@
+[
+  {
+    "id": "177196d-oserror",
+    "split": "tune",
+    "baseSha": "37f09970fa32a330a6660ded3abdb264086531b5",
+    "headSha": "177196d3a5c7ad37b8ccbd0f88445aced07f1ca0",
+    "changedSymbols": [
+      "modified:TimestampSigner.timestamp_to_datetime",
+      "modified:TimestampSigner.unsign",
+      "module:tests/test_itsdangerous/test_timed.py",
+      "signature:TestTimestampSigner.test_malformed_future_timestamp"
+    ],
+    "expectedTests": [
+      "test_malformed_future_timestamp"
+    ],
+    "graphRecommendations": [
+      {
+        "name": "TestTimestampSigner.test_malformed_future_timestamp",
+        "score": 100,
+        "connection": "changed"
+      },
+      {
+        "name": "TestTimestampSigner.test_future_age",
+        "score": 87,
+        "connection": "call-path"
+      },
+      {
+        "name": "TestTimestampSigner.test_malformed_timestamp",
+        "score": 87,
+        "connection": "call-path"
+      },
+      {
+        "name": "TestTimestampSigner.test_max_age",
+        "score": 87,
+        "connection": "call-path"
+      },
+      {
+        "name": "TestTimestampSigner.test_return_timestamp",
+        "score": 87,
+        "connection": "call-path"
+      },
+      {
+        "name": "TestTimestampSigner.test_sig_error_date_signed",
+        "score": 87,
+        "connection": "call-path"
+      },
+      {
+        "name": "TestTimestampSigner.test_timestamp_missing",
+        "score": 87,
+        "connection": "call-path"
+      },
+      {
+        "name": "TestTimedSerializer.test_max_age",
+        "score": 39,
+        "connection": "call-path"
+      },
+      {
+        "name": "TestTimedSerializer.test_return_payload",
+        "score": 39,
+        "connection": "call-path"
+      }
+    ],
+    "strategies": {
+      "all-tests": {
+        "selected": 37,
+        "totalTests": 37,
+        "relevant": 1,
+        "found": 1,
+        "recall": 1,
+        "reduction": 0,
+        "precisionAtK": 0,
+        "k": 5,
+        "missed": []
+      },
+      "changed-files": {
+        "selected": 9,
+        "totalTests": 37,
+        "relevant": 1,
+        "found": 1,
+        "recall": 1,
+        "reduction": 0.7567567567567568,
+        "precisionAtK": 0.2,
+        "k": 5,
+        "missed": []
+      },
+      "changed-plus-imports": {
+        "selected": 9,
+        "totalTests": 37,
+        "relevant": 1,
+        "found": 1,
+        "recall": 1,
+        "reduction": 0.7567567567567568,
+        "precisionAtK": 0.2,
+        "k": 5,
+        "missed": []
+      },
+      "direct-callers": {
+        "selected": 7,
+        "totalTests": 37,
+        "relevant": 1,
+        "found": 1,
+        "recall": 1,
+        "reduction": 0.8108108108108107,
+        "precisionAtK": 0.2,
+        "k": 5,
+        "missed": []
+      },
+      "graph": {
+        "selected": 9,
+        "totalTests": 37,
+        "relevant": 1,
+        "found": 1,
+        "recall": 1,
+        "reduction": 0.7567567567567568,
+        "precisionAtK": 0.2,
+        "k": 5,
+        "missed": []
+      }
+    },
+    "evidenceValid": true,
+    "latencyMs": 1059,
+    "parsedFiles": 16,
+    "unresolved": 27,
+    "note": "Commit also edits the labelled test file."
+  },
+  {
+    "id": "7f4dcf8-lazy-sha1",
+    "split": "tune",
+    "baseSha": "93ae366874bbd4f69d90495c45b2cd336387496c",
+    "headSha": "7f4dcf83a07bb3d53f4e0e65ef1b43327b4cca90",
+    "changedSymbols": [
+      "added:_lazy_sha1",
+      "modified:HMACAlgorithm",
+      "modified:Signer",
+      "module:tests/test_itsdangerous/test_serializer.py",
+      "modified:TestSerializer",
+      "modified:TestSerializer.test_iter_unsigners"
+    ],
+    "expectedTests": [
+      "test_iter_unsigners"
+    ],
+    "graphRecommendations": [
+      {
+        "name": "TestSerializer.test_iter_unsigners",
+        "score": 100,
+        "connection": "changed"
+      },
+      {
+        "name": "TestSigner.test_secret_keys",
+        "score": 92,
+        "connection": "call-path"
+      },
+      {
+        "name": "TestTimestampSigner.test_malformed_timestamp",
+        "score": 92,
+        "connection": "call-path"
+      },
+      {
+        "name": "TestTimestampSigner.test_timestamp_missing",
+        "score": 92,
+        "connection": "call-path"
+      },
+      {
+        "name": "TestSigner.test_algorithm",
+        "score": 88,
+        "connection": "call-path"
+      },
+      {
+        "name": "test_digests",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "TestSerializer.test_alt_salt",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "TestSerializer.test_bad_payload_exception",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "TestSerializer.test_bad_signature_exception",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "TestSerializer.test_changed_value",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "TestSerializer.test_fallback_signers",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "TestSerializer.test_file",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "TestSerializer.test_loads_unsafe",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "TestSerializer.test_serializer_kwargs",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "TestSerializer.test_serializer",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "TestSerializer.test_signer_cls",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "TestSerializer.test_signer_kwargs",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "test_abstract_algorithm",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "TestSigner.test_broken_signature",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "TestSigner.test_changed_value",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "TestSigner.test_digest_method",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "TestSigner.test_invalid_key_derivation",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "TestSigner.test_invalid_separator",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "TestSigner.test_key_derivation",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "TestSigner.test_no_separator",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "TestSigner.test_signer",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "TestTimedSerializer.test_max_age",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "TestTimedSerializer.test_return_payload",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "TestTimestampSigner.test_future_age",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "TestTimestampSigner.test_malformed_future_timestamp",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "TestTimestampSigner.test_max_age",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "TestTimestampSigner.test_return_timestamp",
+        "score": 15,
+        "connection": "file-import"
+      },
+      {
+        "name": "TestTimestampSigner.test_sig_error_date_signed",
+        "score": 15,
+        "connection": "file-import"
+      }
+    ],
+    "strategies": {
+      "all-tests": {
+        "selected": 37,
+        "totalTests": 37,
+        "relevant": 1,
+        "found": 1,
+        "recall": 1,
+        "reduction": 0,
+        "precisionAtK": 0,
+        "k": 5,
+        "missed": []
+      },
+      "changed-files": {
+        "selected": 13,
+        "totalTests": 37,
+        "relevant": 1,
+        "found": 1,
+        "recall": 1,
+        "reduction": 0.6486486486486487,
+        "precisionAtK": 0,
+        "k": 5,
+        "missed": []
+      },
+      "changed-plus-imports": {
+        "selected": 33,
+        "totalTests": 37,
+        "relevant": 1,
+        "found": 1,
+        "recall": 1,
+        "reduction": 0.10810810810810811,
+        "precisionAtK": 0,
+        "k": 5,
+        "missed": []
+      },
+      "direct-callers": {
+        "selected": 5,
+        "totalTests": 37,
+        "relevant": 1,
+        "found": 1,
+        "recall": 1,
+        "reduction": 0.8648648648648649,
+        "precisionAtK": 0.2,
+        "k": 5,
+        "missed": []
+      },
+      "graph": {
+        "selected": 33,
+        "totalTests": 37,
+        "relevant": 1,
+        "found": 1,
+        "recall": 1,
+        "reduction": 0.10810810810810811,
+        "precisionAtK": 0.2,
+        "k": 5,
+        "missed": []
+      }
+    },
+    "evidenceValid": true,
+    "latencyMs": 736,
+    "parsedFiles": 15,
+    "unresolved": 27
+  },
+  {
+    "id": "37f0997-valueerror",
+    "split": "holdout",
+    "baseSha": "85b1e3b76e0e37473dc286450ada725cd02981b4",
+    "headSha": "37f09970fa32a330a6660ded3abdb264086531b5",
+    "changedSymbols": [
+      "modified:TimestampSigner.timestamp_to_datetime",
+      "modified:TimestampSigner.unsign"
+    ],
+    "expectedTests": [
+      "test_malformed_future_timestamp"
+    ],
+    "graphRecommendations": [
+      {
+        "name": "TestTimestampSigner.test_future_age",
+        "score": 87,
+        "connection": "call-path"
+      },
+      {
+        "name": "TestTimestampSigner.test_malformed_future_timestamp",
+        "score": 87,
+        "connection": "call-path"
+      },
+      {
+        "name": "TestTimestampSigner.test_malformed_timestamp",
+        "score": 87,
+        "connection": "call-path"
+      },
+      {
+        "name": "TestTimestampSigner.test_max_age",
+        "score": 87,
+        "connection": "call-path"
+      },
+      {
+        "name": "TestTimestampSigner.test_return_timestamp",
+        "score": 87,
+        "connection": "call-path"
+      },
+      {
+        "name": "TestTimestampSigner.test_sig_error_date_signed",
+        "score": 87,
+        "connection": "call-path"
+      },
+      {
+        "name": "TestTimestampSigner.test_timestamp_missing",
+        "score": 87,
+        "connection": "call-path"
+      },
+      {
+        "name": "TestTimedSerializer.test_max_age",
+        "score": 39,
+        "connection": "call-path"
+      },
+      {
+        "name": "TestTimedSerializer.test_return_payload",
+        "score": 39,
+        "connection": "call-path"
+      }
+    ],
+    "strategies": {
+      "all-tests": {
+        "selected": 37,
+        "totalTests": 37,
+        "relevant": 1,
+        "found": 1,
+        "recall": 1,
+        "reduction": 0,
+        "precisionAtK": 0,
+        "k": 5,
+        "missed": []
+      },
+      "changed-files": {
+        "selected": 0,
+        "totalTests": 37,
+        "relevant": 1,
+        "found": 0,
+        "recall": 0,
+        "reduction": 1,
+        "k": 5,
+        "missed": [
+          "tests/test_itsdangerous/test_timed.py::TestTimestampSigner.test_malformed_future_timestamp::test"
+        ]
+      },
+      "changed-plus-imports": {
+        "selected": 9,
+        "totalTests": 37,
+        "relevant": 1,
+        "found": 1,
+        "recall": 1,
+        "reduction": 0.7567567567567568,
+        "precisionAtK": 0.2,
+        "k": 5,
+        "missed": []
+      },
+      "direct-callers": {
+        "selected": 7,
+        "totalTests": 37,
+        "relevant": 1,
+        "found": 1,
+        "recall": 1,
+        "reduction": 0.8108108108108107,
+        "precisionAtK": 0.2,
+        "k": 5,
+        "missed": []
+      },
+      "graph": {
+        "selected": 9,
+        "totalTests": 37,
+        "relevant": 1,
+        "found": 1,
+        "recall": 1,
+        "reduction": 0.7567567567567568,
+        "precisionAtK": 0.2,
+        "k": 5,
+        "missed": []
+      }
+    },
+    "evidenceValid": true,
+    "latencyMs": 671,
+    "parsedFiles": 16,
+    "unresolved": 27
+  },
+  {
+    "id": "3edfbbb-overflowerror",
+    "split": "holdout",
+    "baseSha": "faa28bccc85ee47a8274536dd3649a0b67d0a75b",
+    "headSha": "3edfbbbc615be5090d452bbf8a13dfdd68436659",
+    "changedSymbols": [
+      "modified:TimestampSigner.unsign"
+    ],
+    "expectedTests": [
+      "test_malformed_future_timestamp"
+    ],
+    "graphRecommendations": [
+      {
+        "name": "TestTimestampSigner.test_future_age",
+        "score": 83,
+        "connection": "call-path"
+      },
+      {
+        "name": "TestTimestampSigner.test_malformed_future_timestamp",
+        "score": 83,
+        "connection": "call-path"
+      },
+      {
+        "name": "TestTimestampSigner.test_malformed_timestamp",
+        "score": 83,
+        "connection": "call-path"
+      },
+      {
+        "name": "TestTimestampSigner.test_max_age",
+        "score": 83,
+        "connection": "call-path"
+      },
+      {
+        "name": "TestTimestampSigner.test_return_timestamp",
+        "score": 83,
+        "connection": "call-path"
+      },
+      {
+        "name": "TestTimestampSigner.test_sig_error_date_signed",
+        "score": 83,
+        "connection": "call-path"
+      },
+      {
+        "name": "TestTimestampSigner.test_timestamp_missing",
+        "score": 83,
+        "connection": "call-path"
+      },
+      {
+        "name": "TestTimedSerializer.test_max_age",
+        "score": 35,
+        "connection": "call-path"
+      },
+      {
+        "name": "TestTimedSerializer.test_return_payload",
+        "score": 35,
+        "connection": "call-path"
+      }
+    ],
+    "strategies": {
+      "all-tests": {
+        "selected": 37,
+        "totalTests": 37,
+        "relevant": 1,
+        "found": 1,
+        "recall": 1,
+        "reduction": 0,
+        "precisionAtK": 0,
+        "k": 5,
+        "missed": []
+      },
+      "changed-files": {
+        "selected": 0,
+        "totalTests": 37,
+        "relevant": 1,
+        "found": 0,
+        "recall": 0,
+        "reduction": 1,
+        "k": 5,
+        "missed": [
+          "tests/test_itsdangerous/test_timed.py::TestTimestampSigner.test_malformed_future_timestamp::test"
+        ]
+      },
+      "changed-plus-imports": {
+        "selected": 9,
+        "totalTests": 37,
+        "relevant": 1,
+        "found": 1,
+        "recall": 1,
+        "reduction": 0.7567567567567568,
+        "precisionAtK": 0.2,
+        "k": 5,
+        "missed": []
+      },
+      "direct-callers": {
+        "selected": 7,
+        "totalTests": 37,
+        "relevant": 1,
+        "found": 1,
+        "recall": 1,
+        "reduction": 0.8108108108108107,
+        "precisionAtK": 0.2,
+        "k": 5,
+        "missed": []
+      },
+      "graph": {
+        "selected": 9,
+        "totalTests": 37,
+        "relevant": 1,
+        "found": 1,
+        "recall": 1,
+        "reduction": 0.7567567567567568,
+        "precisionAtK": 0.2,
+        "k": 5,
+        "missed": []
+      }
+    },
+    "evidenceValid": true,
+    "latencyMs": 661,
+    "parsedFiles": 16,
+    "unresolved": 27
+  }
+]
