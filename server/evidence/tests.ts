@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
+import { isDynamicTestName } from '../../src/analysis/parser'
 import type { AnalysisResult, ReviewFinding, SymbolRecord, TestRecommendation } from '../../src/analysis/types'
-import { runCommand } from './sandbox'
+import { runCommand, sanitizedEnv } from './sandbox'
 
 export type TestRunner = 'pytest' | 'vitest' | 'jest'
 
@@ -79,19 +80,29 @@ export function parseJestJson(json: string, tests: SymbolRecord[], root: string)
   const report = JSON.parse(json) as JestJson
   const normalizedRoot = root.replaceAll('\\', '/').replace(/\/$/, '')
   const byKey = new Map(tests.map((test) => [`${test.path}\0${test.qualifiedName}`, test.id]))
-  const outcomes: TestOutcome[] = []
+  // Tests named at runtime (`test(t.input, …)`) match every instance under the same describe path.
+  const dynamicByScope = new Map(tests.filter((test) => isDynamicTestName(test.name)).map((test) => (
+    [`${test.path}\0${test.qualifiedName.split(' > ').slice(0, -1).join(' > ')}`, test.id]
+  )))
+  const outcomes = new Map<string, TestOutcome>()
+  const rank = { failed: 3, error: 2, passed: 1, skipped: 0 }
   const environmentErrors: string[] = []
   for (const file of report.testResults ?? []) {
     const path = file.name.replaceAll('\\', '/').replace(`${normalizedRoot}/`, '')
     if ((file.assertionResults ?? []).length === 0 && file.status === 'failed') environmentErrors.push(`${path}: ${(file.message ?? 'failed to run').split('\n')[0].slice(0, 300)}`)
     for (const assertion of file.assertionResults ?? []) {
       const testId = byKey.get(`${path}\0${[...assertion.ancestorTitles, assertion.title].join(' > ')}`)
+        ?? dynamicByScope.get(`${path}\0${assertion.ancestorTitles.join(' > ')}`)
       if (!testId) continue
-      const status = assertion.status === 'passed' ? 'passed' : assertion.status === 'failed' ? 'failed' : 'skipped'
-      outcomes.push({ testId, status, message: assertion.failureMessages?.[0]?.split('\n')[0].slice(0, 300) })
+      const status: TestOutcome['status'] = assertion.status === 'passed' ? 'passed' : assertion.status === 'failed' ? 'failed' : 'skipped'
+      const previous = outcomes.get(testId)
+      // Several runtime instances fold into one symbol; any failure wins.
+      if (!previous || rank[status] > rank[previous.status]) {
+        outcomes.set(testId, { testId, status, message: assertion.failureMessages?.[0]?.split('\n')[0].slice(0, 300) })
+      }
     }
   }
-  return { outcomes, environmentErrors }
+  return { outcomes: [...outcomes.values()], environmentErrors }
 }
 
 export function detectRunner(dir: string, tests: SymbolRecord[]): { runner?: TestRunner; reason?: string } {
@@ -121,7 +132,12 @@ export async function runTests(
   let run
   if (runner === 'pytest') {
     // Keep running the remaining selections when one test module fails to import.
-    run = await runCommand('python', ['-m', 'pytest', ...tests.map(pytestNodeId), '-q', '-p', 'no:cacheprovider', '--continue-on-collection-errors', `--junitxml=${reportPath}`, `--rootdir=${dir}`], { cwd: dir, timeoutMs })
+    // src/ layouts import the package from src/ without an editable install.
+    const src = join(dir, 'src')
+    const pythonPath = existsSync(src) ? [src, process.env.PYTHONPATH].filter(Boolean).join(delimiter) : process.env.PYTHONPATH
+    run = await runCommand('python', ['-m', 'pytest', ...tests.map(pytestNodeId), '-q', '-p', 'no:cacheprovider', '--continue-on-collection-errors', `--junitxml=${reportPath}`, `--rootdir=${dir}`], {
+      cwd: dir, timeoutMs, env: sanitizedEnv(pythonPath ? { PYTHONPATH: pythonPath } : {}),
+    })
   } else {
     const files = [...new Set(tests.map((test) => test.path))]
     const entry = runner === 'vitest' ? 'node_modules/vitest/vitest.mjs' : 'node_modules/jest/bin/jest.js'

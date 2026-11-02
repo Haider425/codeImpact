@@ -226,6 +226,21 @@ describe('impacted test runs', () => {
     expect(environmentErrors).toEqual(['tests.test_b: collection failure'])
   })
 
+  it('folds every runtime instance of a data-driven test into its one symbol', () => {
+    const tests = [{ id: 'dyn', path: 'test/url.test.ts', name: '{t.input}', qualifiedName: 'joinURL > {t.input}' }] as SymbolRecord[]
+    const json = JSON.stringify({
+      testResults: [{
+        name: '/repo/test/url.test.ts',
+        assertionResults: [
+          { ancestorTitles: ['joinURL'], title: 'a/b', status: 'passed' },
+          { ancestorTitles: ['joinURL'], title: 'c/d', status: 'failed', failureMessages: ['expected "c/d"'] },
+          { ancestorTitles: ['other'], title: 'x', status: 'failed', failureMessages: ['unrelated'] },
+        ],
+      }],
+    })
+    expect(parseJestJson(json, tests, '/repo').outcomes).toEqual([{ testId: 'dyn', status: 'failed', message: 'expected "c/d"' }])
+  })
+
   it('maps Jest and Vitest JSON reports by file and describe path', () => {
     const tests = [{ id: 't1', path: 'src/a.test.ts', qualifiedName: 'math > adds' }] as SymbolRecord[]
     const json = JSON.stringify({

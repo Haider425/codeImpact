@@ -34,7 +34,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
       - uses: Haider425/codeImpact/actions/analyze@review-layer
         with:
           install-command: npm ci     # or: pip install -e ".[test]"
@@ -67,7 +67,7 @@ The comment is posted once and edited in place on every push. A finished example
 | `timeout-seconds` | `300` | Time limit for each type-check or test run. |
 | `base`, `head` | PR base and head SHAs | Commit range to analyze; the diff starts at their merge base. |
 
-**`actions/comment` inputs:** `fail-on-high` (default `false`), `github-token` (default: the workflow token), `dry-run` (render to the log and job summary only).
+**`actions/comment` inputs:** `fail-on-high` (default `false`), `show-low-severity` (default `false`; low-severity findings are counted but not listed, because on real pull requests they were mostly noise), `github-token` (default: the workflow token), `dry-run` (render to the log and job summary only).
 
 **Security model**
 
@@ -93,7 +93,7 @@ GITHUB_REPOSITORY=you/codeimpact-demo INPUT_REPORT_PATH=report.json INPUT_DRY_RU
 
 ## Quick start
 
-Prerequisites: Node.js 20.11 or newer, and git.
+Prerequisites: Node.js 22.12 or newer (CI uses 24), and git.
 
 ```bash
 git clone https://github.com/Haider425/codeImpact.git

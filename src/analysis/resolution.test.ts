@@ -156,6 +156,27 @@ describe('Python resolution', () => {
 })
 
 describe('TypeScript resolution', () => {
+  it('recognizes data-driven tests whose names are computed at runtime', async () => {
+    const files = [
+      ts('src/url.ts', 'export function joinURL(a: string, b: string) {\n  return a + b\n}\n'),
+      ts('test/url.test.ts', [
+        'import { joinURL } from "../src/url"',
+        'describe("joinURL", () => {',
+        '  for (const t of [{ input: ["a", "b"], out: "ab" }]) {',
+        '    test(t.input.join(), () => {',
+        '      expect(joinURL(t.input[0], t.input[1])).toBe(t.out)',
+        '    })',
+        '  }',
+        '  it(`handles ${"empty"} input`, () => {',
+        '    expect(joinURL("", "")).toBe("")',
+        '  })',
+        '})',
+      ].join('\n')),
+    ]
+    const result = await analyze(files, { 'src/url.ts': 'export function joinURL(a: string, b: string) {\n  return `${a}/${b}`\n}\n' })
+    expect(result.tests.map((test) => test.test.qualifiedName).sort()).toEqual(['joinURL > {`handles ${"empty"} input`}', 'joinURL > {t.input.join()}'])
+  }, 30_000)
+
   it('follows barrel re-exports, namespace imports, default imports, and TSX files', async () => {
     const files = [
       ts('src/lib/math.ts', 'export function add(a: number, b: number) {\n  return a + b\n}\n'),

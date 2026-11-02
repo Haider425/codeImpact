@@ -16,7 +16,7 @@ import type {
   UnresolvedRelationship,
 } from './types'
 
-export const PARSER_VERSION = 'ts-parser/5'
+export const PARSER_VERSION = 'ts-parser/6'
 
 let initPromise: Promise<void> | undefined
 const languageCache = new Map<string, Promise<Parser.Language>>()
@@ -288,12 +288,23 @@ function basesOf(definition: SyntaxNode, source: string) {
 const testCallees = new Set(['it', 'test'])
 const suiteCallees = new Set(['describe', 'suite'])
 
+/**
+ * The name of an `it`/`test`/`describe` call. Literal names are returned as written. Names computed at
+ * runtime (`test(t.input, …)`, template strings with substitutions) cannot be known statically, so they
+ * become `{expression}` and the test runner maps every runtime instance back to that one symbol.
+ */
 function testCallLabel(node: SyntaxNode, source: string) {
   const args = node.childForFieldName('arguments')
   const first = args?.namedChildren[0]
-  if (!first || !['string', 'template_string'].includes(first.type)) return undefined
-  return text(first, source).slice(1, -1)
+  if (!first || ['arrow_function', 'function_expression', 'function'].includes(first.type)) return undefined
+  if (first.type === 'string' || (first.type === 'template_string' && !first.namedChildren.some((child) => child.type === 'template_substitution'))) {
+    return text(first, source).slice(1, -1)
+  }
+  return `{${squash(text(first, source)).slice(0, 80)}}`
 }
+
+/** True for test names produced by `testCallLabel` from a runtime expression. */
+export const isDynamicTestName = (name: string) => /^\{.*\}$/.test(name)
 
 function calleeRoot(node: SyntaxNode, source: string) {
   const fn = node.childForFieldName('function')

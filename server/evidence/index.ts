@@ -7,7 +7,7 @@ import type { Workspace } from './sandbox'
 import { detectRunner, failureFindings, runTests, selectTestsToRun } from './tests'
 import type { TestOutcome, TestRunReport } from './tests'
 import { diagnosticFindings, runPyright, runTsc } from './typecheck'
-import type { CheckerRun } from './typecheck'
+import type { CheckerRun, Diagnostic } from './typecheck'
 
 export interface EvidenceOptions {
   typecheck: boolean
@@ -27,6 +27,9 @@ export const DEFAULT_EVIDENCE_OPTIONS: EvidenceOptions = {
   typecheckTimeoutMs: 180_000,
   testTimeoutMs: 300_000,
 }
+
+/** Unfiltered type-checker output, for callers (the benchmark) that apply their own scope. */
+export interface RawDiagnostics { tool: CheckerRun['tool']; head: Diagnostic[]; base?: Diagnostic[] }
 
 export interface EvidenceReport {
   typecheck?: { head: Omit<CheckerRun, 'diagnostics'> & { errors: number }; base?: Omit<CheckerRun, 'diagnostics'> & { errors: number }; reported: number }[]
@@ -48,11 +51,12 @@ const summarize = (run: CheckerRun) => ({ tool: run.tool, status: run.status, re
  * Optional, slower evidence: the project's type checker and its impacted tests, each run in a temporary
  * copy of the revision with no credentials in the environment and a hard time limit.
  */
-export async function collectEvidence(input: EvidenceInput): Promise<{ findings: ReviewFinding[]; report: EvidenceReport }> {
+export async function collectEvidence(input: EvidenceInput): Promise<{ findings: ReviewFinding[]; report: EvidenceReport; raw: RawDiagnostics[] }> {
   const { options, result } = input
   const findings: ReviewFinding[] = []
   const report: EvidenceReport = {}
-  if (!options.typecheck && !options.runTests) return { findings, report }
+  const raw: RawDiagnostics[] = []
+  if (!options.typecheck && !options.runTests) return { findings, report, raw }
 
   let head: Workspace | undefined
   let base: Workspace | undefined
@@ -79,6 +83,7 @@ export async function collectEvidence(input: EvidenceInput): Promise<{ findings:
           continue
         }
         const baseRun = await check((await baseWorkspace()).dir, options.typecheckTimeoutMs)
+        raw.push({ tool: headRun.tool, head: headRun.diagnostics, base: baseRun.status === 'ran' ? baseRun.diagnostics : undefined })
         const reported = diagnosticFindings(headRun.diagnostics, baseRun.status === 'ran' ? baseRun.diagnostics : undefined, { result, changedPaths: input.changedPaths, lineText })
         findings.push(...reported)
         report.typecheck.push({ head: summarize(headRun), base: summarize(baseRun), reported: reported.length })
@@ -123,5 +128,5 @@ export async function collectEvidence(input: EvidenceInput): Promise<{ findings:
     head?.cleanup()
     base?.cleanup()
   }
-  return { findings, report }
+  return { findings, report, raw }
 }

@@ -16,6 +16,9 @@ inputs:
   fail-on-high:
     description: Fail this job when the report contains high-severity findings.
     default: 'false'
+  show-low-severity:
+    description: Include low-severity findings in the comment. They are hidden by default and only counted.
+    default: 'false'
   dry-run:
     description: Render the comment to the log and job summary without calling the GitHub API.
     default: 'false'
@@ -36,5 +39,6 @@ runs:
         INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
         INPUT_REPORT_PATH: ${{ runner.temp }}/codeimpact-artifact/codeimpact-report.json
         INPUT_FAIL_ON_HIGH: ${{ inputs.fail-on-high }}
+        INPUT_SHOW_LOW_SEVERITY: ${{ inputs.show-low-severity }}
         INPUT_DRY_RUN: ${{ inputs.dry-run }}
       run: node "$GITHUB_ACTION_PATH/comment.mjs"

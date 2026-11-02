@@ -50,7 +50,7 @@ runs:
         BASE: ${{ inputs.base }}
         HEAD: ${{ inputs.head }}
       run: |
-        node -e 'const [maj, min] = process.versions.node.split(".").map(Number); if (maj < 20 || (maj === 20 && min < 11)) { console.log(`::error::CodeImpact needs Node.js 20.11 or newer (found ${process.versions.node}). Add actions/setup-node before this step.`); process.exit(1) }'
+        node -e 'const [maj, min] = process.versions.node.split(".").map(Number); if (maj < 22 || (maj === 22 && min < 12)) { console.log(`::error::CodeImpact needs Node.js 22.12 or newer (found ${process.versions.node}). Add actions/setup-node before this step.`); process.exit(1) }'
         if [ -z "$BASE" ] || [ -z "$HEAD" ]; then
           echo "::error::No base/head commits. Run on pull_request events or set the base and head inputs."
           exit 1

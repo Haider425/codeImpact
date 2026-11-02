@@ -68,7 +68,7 @@ describe('comment rendering', () => {
         { severity: 'low', affected: low.affected, findings: [low] },
       ],
       evidence: { typecheck: [{ head: { tool: 'tsc', status: 'ran' }, reported: 1 }], tests: { runner: 'vitest', status: 'ran', selected: 2, totalTests: 9, passed: 1, failed: 1, errors: 0, skipped: 0, environmentErrors: [] } },
-    }), context)
+    }), context, { showLow: true })
     expect(high).toBe(1)
     expect(body.startsWith(MARKER)).toBe(true)
     expect(body).toContain('**1 high · 0 medium · 1 low** (4 pieces of evidence merged by affected location)')
@@ -81,6 +81,23 @@ describe('comment rendering', () => {
     expect(body).toContain(`  - test run <code>tests/failure</code> ([src/cart.test.ts:5](https://github.com/octo/demo/blob/${head}/src/cart.test.ts#L5)):`)
     expect(body).toContain('inferred link')
     expect(body).toContain('impacted tests (vitest): 2 of 9 selected, 2 ran, 1 failed')
+  })
+
+  it('hides low-severity findings by default and only counts them', () => {
+    const low = finding({ ruleId: 'impact/unupdated-caller', severity: 'low', message: 'x changed internally only.', affected: { path: 'src/other.ts', line: 2, revision: 'head' } })
+    const hidden = renderComment(report([finding(), low]), context).body
+    expect(hidden).toContain('**1 high · 0 medium · 1 low hidden**')
+    expect(hidden).toContain('1 low-severity finding is hidden. Set <code>show-low-severity: true</code>')
+    expect(hidden).not.toContain('x changed internally only')
+    expect(hidden).not.toContain('⚪ Low')
+
+    const onlyLow = renderComment(report([low]), context).body
+    expect(onlyLow).toContain('No high- or medium-severity findings.')
+
+    const shown = renderComment(report([finding(), low]), context, { showLow: true }).body
+    expect(shown).toContain('**1 high · 0 medium · 1 low**')
+    expect(shown).toContain('<details><summary>⚪ Low (1)</summary>')
+    expect(shown).toContain('x changed internally only')
   })
 
   it('links every valid Changed and Affected location', () => {

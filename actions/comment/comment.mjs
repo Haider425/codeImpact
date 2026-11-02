@@ -165,28 +165,42 @@ function renderEvidence(evidence) {
 }
 
 /** Build the PR comment body from an untrusted report and trusted workflow context. */
-export function renderComment(report, context) {
+/**
+ * Low-severity findings are hidden unless `showLow` is set: on real pull requests they were mostly noise
+ * (1 of 13 was a real issue in the benchmark spot-check). Their count is still reported.
+ */
+export function renderComment(report, context, options = {}) {
+  const showLow = options.showLow === true
   const groups = readGroups(report)
-  const findingCount = groups.reduce((sum, group) => sum + group.findings.length, 0)
+  const visible = showLow ? groups : groups.filter((group) => group.severity !== 'low')
+  const findingCount = visible.reduce((sum, group) => sum + group.findings.length, 0)
   const bySeverity = Object.fromEntries(SEVERITIES.map((severity) => [severity, groups.filter((group) => group.severity === severity)]))
   const stats = report?.stats ?? {}
   const n = (value) => (Number.isInteger(value) && value >= 0 ? value : 0)
   const range = context.baseSha && context.headSha ? ` · <code>${context.baseSha.slice(0, 7)}..${context.headSha.slice(0, 7)}</code>` : ''
-  const merged = findingCount > groups.length ? ` (${findingCount} pieces of evidence merged by affected location)` : ''
+  const merged = findingCount > visible.length ? ` (${findingCount} pieces of evidence merged by affected location)` : ''
+  const lowCount = showLow ? `${bySeverity.low.length} low` : `${bySeverity.low.length} low hidden`
   const lines = [
     MARKER,
     '### CodeImpact review',
     '',
-    `**${bySeverity.high.length} high · ${bySeverity.medium.length} medium · ${bySeverity.low.length} low**${merged} — ${n(stats.changedSymbols)} changed symbols, ${n(stats.impactedSymbols)} impacted, ${n(stats.recommendedTests)} tests recommended${range}`,
+    `**${bySeverity.high.length} high · ${bySeverity.medium.length} medium · ${lowCount}**${merged} — ${n(stats.changedSymbols)} changed symbols, ${n(stats.impactedSymbols)} impacted, ${n(stats.recommendedTests)} tests recommended${range}`,
   ]
   const evidence = renderEvidence(report?.evidence)
   if (evidence.length > 0) lines.push('', `Evidence: ${evidence.join(' · ')}`)
-  if (groups.length === 0) lines.push('', 'No findings. That does not mean the change is safe: static analysis can miss dynamic calls.')
+  if (visible.length === 0) {
+    lines.push('', groups.length === 0
+      ? 'No findings. That does not mean the change is safe: static analysis can miss dynamic calls.'
+      : 'No high- or medium-severity findings. That does not mean the change is safe: static analysis can miss dynamic calls.')
+  }
+  if (!showLow && bySeverity.low.length > 0) {
+    lines.push('', `<sub>${bySeverity.low.length} low-severity finding${bySeverity.low.length === 1 ? ' is' : 's are'} hidden. Set <code>show-low-severity: true</code> on the comment action to include them.</sub>`)
+  }
 
   const headings = { high: '🔴 High', medium: '🟠 Medium', low: '⚪ Low' }
   for (const severity of SEVERITIES) {
     const items = bySeverity[severity]
-    if (items.length === 0) continue
+    if (items.length === 0 || (severity === 'low' && !showLow)) continue
     const body = items.slice(0, SHOWN[severity]).map((group) => renderGroup(group, context))
     if (items.length > SHOWN[severity]) body.push(`- …and ${items.length - SHOWN[severity]} more ${severity}-severity findings in the job summary artifact.`)
     if (severity === 'low') lines.push('', `<details><summary>${headings[severity]} (${items.length})</summary>`, '', ...body, '', '</details>')
@@ -275,7 +289,7 @@ async function main() {
     if (report && (report.schemaVersion === 1 || report.schemaVersion === 2)) {
       // The analysis ran on the merge base; prefer it for base-side links when it is a well-formed SHA.
       context.baseSha = safeSha(report.target?.baseSha) ?? context.baseSha
-      rendered = renderComment(report, context)
+      rendered = renderComment(report, context, { showLow: env.INPUT_SHOW_LOW_SEVERITY === 'true' })
     } else {
       rendered = { body: failureComment(context, 'the report artifact was missing or malformed.'), high: 0 }
     }

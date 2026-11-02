@@ -118,7 +118,7 @@
       }
     },
     "evidenceValid": true,
-    "latencyMs": 686,
+    "latencyMs": 1059,
     "parsedFiles": 16,
     "unresolved": 27,
     "note": "Commit also edits the labelled test file."
@@ -364,7 +364,7 @@
       }
     },
     "evidenceValid": true,
-    "latencyMs": 377,
+    "latencyMs": 736,
     "parsedFiles": 15,
     "unresolved": 27
   },
@@ -486,7 +486,7 @@
       }
     },
     "evidenceValid": true,
-    "latencyMs": 657,
+    "latencyMs": 671,
     "parsedFiles": 16,
     "unresolved": 27
   },
@@ -607,7 +607,7 @@
       }
     },
     "evidenceValid": true,
-    "latencyMs": 706,
+    "latencyMs": 661,
     "parsedFiles": 16,
     "unresolved": 27
   }

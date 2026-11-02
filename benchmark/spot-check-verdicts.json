@@ -1,0 +1,29 @@
+{
+  "reviewedBy": "Haider425",
+  "method": "Each finding was reviewed against the pull request's full diff on GitHub, not only the lines the finding cites.",
+  "verdicts": [
+    { "pr": "pallets/click#3851", "affected": "examples/repo/repo.py:140", "verdict": "FP", "note": "Docstring only: a warning block was added to edit. No code change." },
+    { "pr": "pallets/click#3767", "affected": "src/click/termui.py:98", "verdict": "FP", "note": "Comment only: renames MaybeStripAnsi to _PagerWriter in a comment. The hasattr check still holds." },
+    { "pr": "unjs/ufo#290", "affected": "src/url.ts:36", "verdict": "FP", "note": "Swaps new EmptyObject() for Object.create(null). Both have no Object methods; only prototype identity changes." },
+    { "pr": "pallets/itsdangerous#377", "affected": "src/itsdangerous/url_safe.py:53", "verdict": "FP", "note": "Annotation widened to _PDataSerializer[t.Any]. The tool correctly said no caller is affected, so it should not be a finding." },
+    { "pr": "pallets/click#3781", "affected": "examples/repo/repo.py:140", "verdict": "FP", "note": "filename type widened to accept os.PathLike. The caller passes text; the tool's \"not affected\" is right." },
+    { "pr": "pallets/itsdangerous#377", "affected": "tests/test_itsdangerous/test_serializer.py:149", "verdict": "FP", "note": "Type level only. The Protocol dumps lost **kwargs, but the runtime serializer is json, which takes skipkeys, and tests are not type checked." },
+    { "pr": "pallets/click#3851", "affected": "src/click/testing.py:687", "verdict": "FP", "note": "Command.main's except chain was rewritten, but exit codes, the \"Aborted!\" message, and non-standalone propagation are preserved." },
+    { "pr": "pallets/click#3728", "affected": "src/click/exceptions.py:96", "verdict": "FP", "note": "Label wrong: the return value did change (a set became an ordered list), but UsageError.show uses max(key=len), so only equal-length ties differ." },
+    { "pr": "pallets/click#3877", "affected": "src/click/exceptions.py:150", "verdict": "FP", "note": "The returned expression changed textually but not in value: get_help_spec returns make_metavar, and spec has the old human_readable_name body." },
+    { "pr": "unjs/ufo#286", "affected": "src/url.ts:36", "verdict": "TP", "note": "Label wrong (\"internally only\"). parseQuery's result went from {} to a null-prototype object, so hasOwnProperty, toString and other Object methods disappear, and $URL.query and getQuery hand it straight to users." },
+    { "pr": "pallets/itsdangerous#377", "affected": "tests/test_itsdangerous/test_serializer.py:123", "verdict": "FP", "note": "Receiver misresolved. serializer is a Serializer, whose dumps(obj, salt=None) still takes salt; the tool matched the Protocol's dumps by name." },
+    { "pr": "pallets/click#3876", "affected": "examples/aliases/aliases.py:92", "verdict": "FP", "note": "Typing only: Path was made generic over path_type. Runtime behaviour is unchanged." },
+    { "pr": "unjs/ufo#278", "affected": "src/query.ts:81", "verdict": "FP", "note": "Comment-only typo fix inside encodeQueryValue." }
+  ],
+  "underRated": [
+    { "pr": "unjs/ufo#286", "note": "A real behaviour change reported as low severity and labelled \"internally only\": parseQuery's result changed from a plain object to a null-prototype object." }
+  ],
+  "failurePatterns": [
+    { "pattern": "Findings are emitted even when the tool itself concludes that no caller is affected.", "rows": "4, 5, 12, and the internals-only rows" },
+    { "pattern": "Comment and docstring edits count as changes.", "rows": "1, 2, 13" },
+    { "pattern": "Return-value changes are missed by the \"internals only\" label, because only return expressions are compared, not how the returned value is built.", "rows": "8, 10" },
+    { "pattern": "Name-based method resolution picks the wrong class.", "rows": "11" },
+    { "pattern": "Protocol signatures are treated as runtime contracts.", "rows": "6" }
+  ]
+}
