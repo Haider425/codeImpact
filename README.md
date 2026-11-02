@@ -4,6 +4,91 @@ CodeImpact analyzes a pull request in a Python or TypeScript repository. It find
 
 The full product spec is in [codeImpact_mvp.md](codeImpact_mvp.md).
 
+## GitHub Action
+
+Add `.github/workflows/codeimpact.yml` to the repository you want reviewed:
+
+```yaml
+name: CodeImpact
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions: {}
+concurrency:
+  group: codeimpact-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:                      # runs repository code; read-only token
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0              # the merge base must be available
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: Haider425/codeImpact/actions/analyze@review-layer
+        with:
+          install-command: npm ci     # or: pip install -e ".[test]"
+          typecheck: true             # optional, off by default
+          run-tests: true             # optional, off by default
+
+  comment:                      # never runs repository code; may write the PR comment
+    needs: analyze
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: Haider425/codeImpact/actions/comment@review-layer
+        with:
+          fail-on-high: false         # true fails the check when high-severity findings exist
+```
+
+The comment is posted once and edited in place on every push. A finished example is the demo repository described in [Trying it end to end](#trying-it-end-to-end).
+
+**`actions/analyze` inputs**
+
+| Input | Default | |
+|---|---|---|
+| `install-command` | none | Installs the project's dependencies. Needed for type checks and test runs. |
+| `typecheck` | `false` | Run `tsc` (needs a `tsconfig.json`) or pyright (needs a pyright or mypy config) on base and head. pyright is installed automatically for Python projects. |
+| `run-tests` | `false` | Run the top-ranked impacted tests with pytest, vitest, or jest, and re-run failures on base. |
+| `max-tests` | `20` | Upper bound on impacted tests to run. |
+| `timeout-seconds` | `300` | Time limit for each type-check or test run. |
+| `base`, `head` | PR base and head SHAs | Commit range to analyze; the diff starts at their merge base. |
+
+**`actions/comment` inputs:** `fail-on-high` (default `false`), `github-token` (default: the workflow token), `dry-run` (render to the log and job summary only).
+
+**Security model**
+
+- The analyze job runs your install command and, if enabled, your tests, so it gets `contents: read` and nothing else. Checkout uses `persist-credentials: false`. Type checkers and tests run in a temporary copy of each revision, with an environment that drops tokens and secrets, under a hard time limit.
+- The comment job holds `pull-requests: write`. It downloads the report artifact and runs one dependency-free script; it never checks out or executes the pull request's code.
+- The report artifact comes from a job that ran repository code, so the comment step treats it as untrusted input. It validates every field, escapes HTML and markdown, neutralizes `@mentions`, URLs, and `#123` references, truncates long output, and builds links only from validated paths and from the repository name and commit SHAs in the trusted event payload.
+- Do not trigger this workflow from `pull_request_target`.
+- Fork pull requests get a read-only token, so the comment step writes the results to the job summary instead of commenting.
+- Third-party actions are referenced by major tag (`@v4`). Pin them to commit SHAs if your policy requires it.
+
+This repository reviews its own pull requests with [.github/workflows/codeimpact.yml](.github/workflows/codeimpact.yml). There, the comment job checks out the comment action from the PR's base commit, so a pull request cannot change the code that holds the write token. As a result, the comment job fails on the first pull request that adds the action, because the base commit does not contain it yet.
+
+### Trying it end to end
+
+A demo project lives outside this repository at `codeimpact-demo` (a sibling folder). Its `main` branch is a small TypeScript pricing module with passing tests. Its `break-discount` branch adds a required parameter to `applyDiscount()` without updating the caller in `src/cart.ts`. A pull request from `break-discount` produces three high-severity findings: a rule finding (missing argument), a type-checker finding (`tsc` TS2554 in `src/cart.ts`), and two impacted `checkout` tests that pass on `main` and fail on the PR.
+
+To run the same steps locally without GitHub:
+
+```bash
+npm run review -- --repo ../codeimpact-demo --base main --head break-discount --typecheck --run-tests --output report.json
+GITHUB_REPOSITORY=you/codeimpact-demo INPUT_REPORT_PATH=report.json INPUT_DRY_RUN=true node actions/comment/comment.mjs
+```
+
 ## Quick start
 
 ```bash

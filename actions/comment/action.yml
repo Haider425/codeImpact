@@ -1,0 +1,40 @@
+name: CodeImpact comment
+description: >-
+  Post or update one CodeImpact summary comment on the pull request from the analyze job's report.
+  It never checks out or runs repository code, and treats the report as untrusted input.
+branding:
+  icon: message-square
+  color: green
+
+inputs:
+  github-token:
+    description: 'Token with `pull-requests: write`. The default workflow token is enough.'
+    default: ${{ github.token }}
+  artifact-name:
+    description: Name of the report artifact uploaded by the analyze action.
+    default: codeimpact-report
+  fail-on-high:
+    description: Fail this job when the report contains high-severity findings.
+    default: 'false'
+  dry-run:
+    description: Render the comment to the log and job summary without calling the GitHub API.
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Download report
+      uses: actions/download-artifact@v4
+      continue-on-error: true
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ runner.temp }}/codeimpact-artifact
+
+    - name: Comment
+      shell: bash
+      env:
+        INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
+        INPUT_REPORT_PATH: ${{ runner.temp }}/codeimpact-artifact/codeimpact-report.json
+        INPUT_FAIL_ON_HIGH: ${{ inputs.fail-on-high }}
+        INPUT_DRY_RUN: ${{ inputs.dry-run }}
+      run: node "$GITHUB_ACTION_PATH/comment.mjs"

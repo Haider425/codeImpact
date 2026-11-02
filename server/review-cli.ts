@@ -1,3 +1,4 @@
+import { writeFileSync } from 'node:fs'
 import { basename, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { analyzeRepository } from '../src/analysis/engine'
@@ -18,7 +19,8 @@ Options:
   --run-tests         run the top-ranked impacted tests (executes repository code)
   --max-tests <n>     impacted tests to run (default ${DEFAULT_EVIDENCE_OPTIONS.maxTests})
   --timeout <s>       time limit per checker or test run, in seconds
-  --json              print machine-readable output`
+  --json              print machine-readable output
+  --output <file>     write the machine-readable report to a file (used by the GitHub Action)`
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -31,6 +33,7 @@ const { values, positionals } = parseArgs({
     'max-tests': { type: 'string' },
     timeout: { type: 'string' },
     json: { type: 'boolean', default: false },
+    output: { type: 'string' },
     help: { type: 'boolean', default: false },
   },
 })
@@ -102,8 +105,19 @@ try {
   const order = { high: 0, medium: 1, low: 2 }
   const findings = [...result.review, ...evidence.findings].sort((a, b) => order[a.severity] - order[b.severity])
 
+  const report = {
+    schemaVersion: 1,
+    tool: { name: 'codeimpact', parser: result.settings.parserVersion, algorithm: result.settings.algorithmVersion },
+    target: { owner: target.owner, name: target.name, number: target.number, title: target.title, baseSha: target.base, headSha: target.head },
+    findings,
+    evidence: evidence.report,
+    stats: result.stats,
+    limitations: result.limitations,
+  }
+  if (values.output) writeFileSync(values.output, `${JSON.stringify(report, null, 2)}
+`)
   if (values.json) {
-    console.log(JSON.stringify({ target: { ...target, cwd: undefined }, review: findings, evidence: evidence.report, stats: result.stats }, null, 2))
+    console.log(JSON.stringify(report, null, 2))
   } else {
     const where = (location: ReviewFinding['changed']) => `${location.path}:${location.line}${location.revision === 'base' ? ' (base)' : ''}`
     console.log(`${target.owner}/${target.name}${target.number ? `#${target.number}` : ''}  ${target.title}`)

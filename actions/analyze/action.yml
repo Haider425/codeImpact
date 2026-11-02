@@ -1,0 +1,114 @@
+name: CodeImpact analyze
+description: >-
+  Trace the impact of a pull request across the repository and write a JSON report artifact.
+  Run it in a job with `contents: read` only. Pair it with the CodeImpact comment action in a
+  separate job to post the results.
+branding:
+  icon: git-pull-request
+  color: green
+
+inputs:
+  base:
+    description: Base commit. Defaults to the pull request's base SHA; the analysis diffs from its merge base with head.
+    default: ${{ github.event.pull_request.base.sha }}
+  head:
+    description: Head commit. Defaults to the pull request's head SHA.
+    default: ${{ github.event.pull_request.head.sha }}
+  install-command:
+    description: Command that installs the project's dependencies, e.g. `npm ci` or `pip install -e ".[test]"`. Needed for type checks and test runs.
+    default: ''
+  typecheck:
+    description: Run the project's type checker (tsc, or pyright for Python) on base and head.
+    default: 'false'
+  run-tests:
+    description: Run the top-ranked impacted tests. This executes repository code.
+    default: 'false'
+  max-tests:
+    description: Maximum number of impacted tests to run.
+    default: '20'
+  timeout-seconds:
+    description: Time limit for each type-check or test run.
+    default: '300'
+  pyright-version:
+    description: pyright version installed when type checking a Python project.
+    default: '1.1.414'
+  artifact-name:
+    description: Name of the uploaded report artifact.
+    default: codeimpact-report
+
+outputs:
+  report-path:
+    description: Path of the JSON report on the runner.
+    value: ${{ steps.analyze.outputs.report-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check environment
+      shell: bash
+      env:
+        BASE: ${{ inputs.base }}
+        HEAD: ${{ inputs.head }}
+      run: |
+        node -e 'const [maj, min] = process.versions.node.split(".").map(Number); if (maj < 20 || (maj === 20 && min < 11)) { console.log(`::error::CodeImpact needs Node.js 20.11 or newer (found ${process.versions.node}). Add actions/setup-node before this step.`); process.exit(1) }'
+        if [ -z "$BASE" ] || [ -z "$HEAD" ]; then
+          echo "::error::No base/head commits. Run on pull_request events or set the base and head inputs."
+          exit 1
+        fi
+        if [ "$(git -C "$GITHUB_WORKSPACE" rev-parse --is-shallow-repository)" = "true" ]; then
+          echo "::error::The checkout is shallow. Use actions/checkout with fetch-depth: 0 so the merge base is available."
+          exit 1
+        fi
+
+    - name: Install CodeImpact
+      shell: bash
+      working-directory: ${{ github.action_path }}/../..
+      # Lifecycle scripts are skipped; the reviewer needs none of them.
+      run: npm ci --ignore-scripts --no-audit --no-fund --loglevel=error
+
+    - name: Install project dependencies
+      if: inputs.install-command != ''
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        INSTALL_COMMAND: ${{ inputs.install-command }}
+      run: eval "$INSTALL_COMMAND"
+
+    - name: Install pyright
+      if: inputs.typecheck == 'true'
+      shell: bash
+      env:
+        PYRIGHT_VERSION: ${{ inputs.pyright-version }}
+      run: |
+        if git -C "$GITHUB_WORKSPACE" ls-files -- '*.py' | grep -q .; then
+          npm install --prefix "$RUNNER_TEMP/codeimpact-pyright" --no-audit --no-fund --loglevel=error "pyright@$PYRIGHT_VERSION"
+          echo "$RUNNER_TEMP/codeimpact-pyright/node_modules/.bin" >> "$GITHUB_PATH"
+        fi
+
+    - name: Analyze
+      id: analyze
+      shell: bash
+      working-directory: ${{ github.action_path }}/../..
+      env:
+        BASE: ${{ inputs.base }}
+        HEAD: ${{ inputs.head }}
+        TYPECHECK: ${{ inputs.typecheck }}
+        RUN_TESTS: ${{ inputs.run-tests }}
+        MAX_TESTS: ${{ inputs.max-tests }}
+        TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
+      run: |
+        report="$RUNNER_TEMP/codeimpact-report.json"
+        args=(--repo "$GITHUB_WORKSPACE" --base "$BASE" --head "$HEAD" --output "$report" --max-tests "$MAX_TESTS" --timeout "$TIMEOUT_SECONDS")
+        if [ "$TYPECHECK" = "true" ]; then args+=(--typecheck); fi
+        if [ "$RUN_TESTS" = "true" ]; then args+=(--run-tests); fi
+        node node_modules/tsx/dist/cli.mjs server/review-cli.ts "${args[@]}"
+        echo "report-path=$report" >> "$GITHUB_OUTPUT"
+
+    - name: Upload report
+      if: always() && steps.analyze.outputs.report-path != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ steps.analyze.outputs.report-path }}
+        retention-days: 7
+        if-no-files-found: error
