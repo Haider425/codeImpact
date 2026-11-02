@@ -1,10 +1,15 @@
 import { writeFileSync } from 'node:fs'
 import { basename, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
-import { analyzeRepository } from '../src/analysis/engine'
+import { ALGORITHM_VERSION, analyzeRepository } from '../src/analysis/engine'
+import { PARSER_VERSION } from '../src/analysis/parser'
+import { groupFindings } from '../src/analysis/merge'
 import type { ReviewFinding } from '../src/analysis/types'
 import { loadConfig } from './config'
+import { Store } from './db'
 import { AnalysisError } from './errors'
+import { buildEvidenceBundle, explainAnalysis } from './explain'
+import { compactResult } from './pipeline'
 import { collectEvidence, DEFAULT_EVIDENCE_OPTIONS } from './evidence'
 import type { EvidenceReport } from './evidence'
 import { loadRepositoryRevisions, mergeBase, resolveCommit } from './git'
@@ -20,7 +25,9 @@ Options:
   --max-tests <n>     impacted tests to run (default ${DEFAULT_EVIDENCE_OPTIONS.maxTests})
   --timeout <s>       time limit per checker or test run, in seconds
   --json              print machine-readable output
-  --output <file>     write the machine-readable report to a file (used by the GitHub Action)`
+  --output <file>     write the machine-readable report to a file (used by the GitHub Action)
+  --store             save the analysis, with its evidence, to the local database for the web UI
+  --as <owner/repo#n> label a --repo analysis with the public pull request it belongs to`
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -34,6 +41,8 @@ const { values, positionals } = parseArgs({
     timeout: { type: 'string' },
     json: { type: 'boolean', default: false },
     output: { type: 'string' },
+    store: { type: 'boolean', default: false },
+    as: { type: 'string' },
     help: { type: 'boolean', default: false },
   },
 })
@@ -58,6 +67,12 @@ async function resolveTarget() {
     if (!values.base || !values.head) throw new AnalysisError('invalid_arguments', '--repo needs --base and --head.', false)
     const head = await resolveCommit(values.repo, values.head)
     const base = await mergeBase(values.repo, await resolveCommit(values.repo, values.base), head)
+    // --as labels a local checkout of a public repository with its GitHub identity, so stored reports link to it.
+    const identity = values.as ? parsePullRequestRef(values.as) : undefined
+    if (values.as && !identity) throw new AnalysisError('invalid_arguments', `--as expects owner/repo#number, got ${values.as}`, false)
+    if (identity) {
+      return { cwd: values.repo, base, head, owner: identity.owner, name: identity.repo, title: `${values.base}…${values.head}`, number: identity.number, author: '', baseRef: values.base, headRef: values.head }
+    }
     const name = basename(resolve(values.repo))
     return { cwd: values.repo, base, head, owner: 'local', name, title: `${values.base}…${values.head}`, number: 0, author: '', baseRef: values.base, headRef: values.head }
   }
@@ -104,18 +119,50 @@ try {
   })
   const order = { high: 0, medium: 1, low: 2 }
   const findings = [...result.review, ...evidence.findings].sort((a, b) => order[a.severity] - order[b.severity])
+  const groups = groupFindings(findings, result.edges)
 
   const report = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     tool: { name: 'codeimpact', parser: result.settings.parserVersion, algorithm: result.settings.algorithmVersion },
     target: { owner: target.owner, name: target.name, number: target.number, title: target.title, baseSha: target.base, headSha: target.head },
     findings,
+    /** Findings merged by affected location; the PR comment and web UI render these. */
+    groups,
     evidence: evidence.report,
     stats: result.stats,
     limitations: result.limitations,
   }
-  if (values.output) writeFileSync(values.output, `${JSON.stringify(report, null, 2)}
-`)
+  if (values.output) writeFileSync(values.output, `${JSON.stringify(report, null, 2)}\n`)
+  if (values.store) {
+    const store = new Store(config.dbPath)
+    const repository = store.upsertRepository(target.owner === 'local'
+      ? { source: 'local', owner: 'local', name: target.name }
+      : { source: 'github', owner: target.owner, name: target.name })
+    // Rule, type-checker, and test findings all go into the stored review so the web UI shows every source.
+    const reviewed = { ...result, review: findings }
+    const flags = `${values.typecheck ? 't' : ''}${values['run-tests'] ? 'r' : ''}`
+    const id = store.recordCompleted({
+      repository_id: repository.id,
+      pull_request_number: target.number || null,
+      pull_request_title: target.title,
+      pull_request_author: target.author || null,
+      base_ref: target.baseRef,
+      head_ref: target.headRef,
+      base_sha: target.base,
+      head_sha: target.head,
+      dedupe_key: `cli:${repository.source}:${target.owner}/${target.name}#${target.number}@${target.base}..${target.head}/${PARSER_VERSION}/${ALGORITHM_VERSION}/${flags}`,
+    }, {
+      result: { ...compactResult(reviewed, loaded.repository.base.files, loaded.repository.head.files, loaded.changed), evidence: evidence.report },
+      timings: {},
+      mergeBase: target.base,
+      parserVersion: PARSER_VERSION,
+      algorithmVersion: ALGORITHM_VERSION,
+    })
+    const explanation = explainAnalysis(buildEvidenceBundle(reviewed, { repository: `${target.owner}/${target.name}`, number: target.number, title: target.title }))
+    store.saveExplanation(id, { structuredOutput: explanation.explanation, modelIdentifier: explanation.modelIdentifier, promptVersion: explanation.promptVersion, status: explanation.status, issues: explanation.issues, latencyMs: explanation.latencyMs })
+    store.db.close()
+    if (!values.json) console.log(`Stored as analysis #${id} in ${config.dbPath}`)
+  }
   if (values.json) {
     console.log(JSON.stringify(report, null, 2))
   } else {
@@ -124,21 +171,20 @@ try {
     console.log(`${target.base.slice(0, 7)}..${target.head.slice(0, 7)} · ${result.stats.changedSymbols} changed symbols · ${result.stats.impactedSymbols} impacted · ${result.stats.recommendedTests} tests recommended · ${result.stats.durationMs} ms`)
     printEvidence(evidence.report)
     console.log('')
-    if (findings.length === 0) console.log('No findings. That does not mean the change is safe; see the impact report.')
-    for (const finding of findings) {
-      console.log(`[${finding.severity.toUpperCase()}] ${finding.ruleId} (${finding.source}, ${finding.confidence})`)
-      console.log(`  ${finding.message.replaceAll('`', '')}`)
-      console.log(`  changed:  ${where(finding.changed)}`)
-      if (finding.details) {
-        console.log(`  callers outside the PR (${finding.details.changeKinds.join(', ')}):`)
-        for (const caller of finding.details.callers) {
+    if (groups.length === 0) console.log('No findings. That does not mean the change is safe; see the impact report.')
+    const sourceLabel = { rule: 'rule', typecheck: 'type checker', 'test-run': 'test run' }
+    for (const group of groups) {
+      console.log(`[${group.severity.toUpperCase()}] ${where(group.affected)}${group.affected.symbol ? `  ${group.affected.symbol}` : ''}  ·  evidence: ${group.sources.map((source) => sourceLabel[source]).join(', ')}`)
+      console.log(`  changed: ${group.changed.map(where).join(', ')}`)
+      for (const finding of group.findings) {
+        console.log(`  - ${finding.ruleId} (${sourceLabel[finding.source]}, ${finding.severity}${finding.confidence === 'inferred' ? ', inferred link' : ''}): ${finding.message.replaceAll('`', '')}`)
+        if (finding.source === 'test-run') console.log(`      test: ${where(finding.affected)}`)
+        for (const caller of finding.details?.callers ?? []) {
           const status = caller.affected ? `affected${caller.confirmed ? '' : ', inferred link'}` : 'not affected'
-          console.log(`    ${where(caller.location)}  ${caller.location.symbol}  [${status}]${caller.reasons.length ? ` ${caller.reasons.join('; ').replaceAll('`', '')}` : ''}`)
+          console.log(`      ${where(caller.location)}  ${caller.location.symbol}  [${status}]${caller.reasons.length ? ` ${caller.reasons.join('; ').replaceAll('`', '')}` : ''}`)
         }
-        console.log('')
-      } else {
-        console.log(`  affected: ${where(finding.affected)}\n`)
       }
+      console.log('')
     }
   }
 } catch (error) {

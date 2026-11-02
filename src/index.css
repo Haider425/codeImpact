@@ -23,6 +23,9 @@
     --line-default: var(--primitive-ink-800);
     --action-primary: var(--primitive-aqua);
     --change-accent: var(--primitive-orange);
+    --severity-high: oklch(0.7 0.19 25);
+    --severity-medium: oklch(0.82 0.15 80);
+    --source-typecheck: oklch(0.78 0.12 250);
 
     --background: var(--surface-page);
     --foreground: var(--text-primary);
@@ -460,6 +463,54 @@ a.button { text-decoration: none; }
 @media (max-width: 560px) {
   .input-row { flex-direction: column; }
   .explanation-block { padding: 18px 16px; }
+}
+
+/* Review findings */
+.findings-block { border: 1px solid var(--line-default); background: var(--surface-raised); padding: 22px 24px; margin-bottom: 18px; }
+.findings-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.findings-heading h2 { color: var(--text-primary); font-size: 20px; letter-spacing: -.04em; font-weight: 600; margin: 6px 0 0; }
+.findings-heading p { color: var(--text-muted); font-size: 10px; margin: 0; }
+.findings-block .empty-note { display: flex; align-items: center; gap: 6px; }
+.finding-severity { margin-top: 14px; }
+.finding-severity-heading, .finding-severity > summary { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 10px; cursor: default; }
+.finding-severity > summary { cursor: pointer; }
+.finding-severity small { color: var(--text-muted); font-weight: 450; }
+.finding-severity--high > .finding-severity-heading { color: var(--severity-high); }
+.finding-severity--medium > .finding-severity-heading { color: var(--severity-medium); }
+.finding-severity--low > summary { color: var(--text-muted); }
+.finding-card { border: 1px solid var(--line-default); border-left-width: 3px; background: var(--surface-page); padding: 14px 16px; margin-bottom: 10px; }
+.finding-card--high { border-left-color: var(--severity-high); }
+.finding-card--medium { border-left-color: var(--severity-medium); }
+.finding-card--low { border-left-color: var(--primitive-ink-700); }
+.finding-card > header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.finding-card h3 { color: var(--text-primary); font-size: 13px; font-weight: 600; margin: 0; }
+.finding-symbol { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line-default); background: transparent; color: var(--action-primary); font-size: 11px; padding: 2px 7px; border-radius: 3px; }
+.finding-sources { display: inline-flex; flex-wrap: wrap; gap: 5px; margin-left: auto; }
+.source-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; padding: 2px 7px; border-radius: 3px; border: 1px solid var(--line-default); color: var(--text-body); white-space: nowrap; }
+.source-badge--rule { color: var(--action-primary); border-color: color-mix(in oklch, var(--action-primary) 35%, transparent); }
+.source-badge--typecheck { color: var(--source-typecheck); border-color: color-mix(in oklch, var(--source-typecheck) 40%, transparent); }
+.source-badge--test-run { color: var(--change-accent); border-color: color-mix(in oklch, var(--change-accent) 40%, transparent); }
+.finding-locations { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.finding-location { display: inline-flex; align-items: center; gap: 5px; min-height: 26px; padding: 3px 8px; border: 1px solid var(--line-default); border-radius: 3px; background: var(--surface-raised); color: var(--text-body); font-size: 11px; overflow-wrap: anywhere; text-align: left; }
+.finding-location > span { color: var(--text-muted); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+.finding-location:hover { border-color: var(--action-primary); color: var(--text-primary); }
+.finding-evidence { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.finding-evidence > li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding-top: 10px; border-top: 1px dashed var(--primitive-ink-700); }
+.finding-evidence p { flex-basis: 100%; margin: 0; color: var(--text-body); font-size: 12px; line-height: 1.6; }
+.finding-rule { color: var(--text-muted); font-size: 10px; }
+.finding-inferred { color: var(--text-muted); font-size: 10px; font-style: italic; }
+.finding-callers { flex-basis: 100%; list-style: none; margin: 2px 0 0; padding: 0; display: grid; gap: 4px; font-size: 11px; }
+.finding-callers li { display: flex; flex-wrap: wrap; gap: 8px; }
+.finding-callers button { border: 0; background: transparent; padding: 0; color: var(--action-primary); font-size: 11px; text-decoration: underline; text-underline-offset: 2px; }
+.caller-affected { color: var(--severity-medium); }
+.caller-unaffected { color: var(--text-muted); }
+.showcase-banner { display: flex; align-items: center; gap: 10px; border: 1px solid color-mix(in oklch, var(--action-primary) 30%, transparent); background: color-mix(in oklch, var(--action-primary) 6%, transparent); color: var(--text-body); padding: 12px 16px; font-size: 12px; margin-bottom: 26px; }
+.showcase-banner svg { color: var(--action-primary); flex-shrink: 0; }
+
+@media (max-width: 560px) {
+  .findings-block { padding: 18px 16px; }
+  .findings-heading { flex-direction: column; align-items: flex-start; }
+  .finding-sources { margin-left: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

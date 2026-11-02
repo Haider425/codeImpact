@@ -51,6 +51,8 @@ export interface AnalysisReport {
 }
 
 export interface ServerConfig {
+  /** Read-only showcase of saved reports; new analyses are disabled. */
+  showcase: boolean
   githubTokenConfigured: boolean
   webhookConfigured: boolean
   localRepositories: string[]

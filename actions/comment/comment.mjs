@@ -87,24 +87,58 @@ const RULE_TITLES = {
   'tests/failure': 'Impacted test fails',
 }
 
-function renderFinding(finding, context) {
-  const ruleId = typeof finding.ruleId === 'string' ? finding.ruleId : 'unknown'
+const SEVERITY_RANK = { high: 0, medium: 1, low: 2 }
+const SOURCE_ORDER = ['rule', 'typecheck', 'test-run']
+const MAX_ITEMS_PER_GROUP = 8
+
+/**
+ * Groups come from the untrusted artifact too, so they are rebuilt from validated parts. Reports without
+ * groups (schema version 1) render each finding as its own group.
+ */
+export function readGroups(report) {
+  const raw = Array.isArray(report?.groups) ? report.groups : (Array.isArray(report?.findings) ? report.findings : []).map((finding) => ({ findings: [finding] }))
+  return raw.flatMap((group) => {
+    const findings = (Array.isArray(group?.findings) ? group.findings : []).filter(isFinding).slice(0, 50)
+    if (findings.length === 0) return []
+    findings.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])
+    const affected = group.affected && typeof group.affected === 'object' ? group.affected : findings[0].affected
+    const changed = [...new Map(findings.map((finding) => finding.changed).filter((location) => location && typeof location === 'object')
+      .map((location) => [`${location.revision}:${location.path}:${location.line}`, location])).values()]
+    const sources = SOURCE_ORDER.filter((source) => findings.some((finding) => finding.source === source))
+    // Severity is recomputed from the evidence rather than trusted from the group.
+    return [{ severity: findings[0].severity, affected, changed, findings, sources }]
+  }).sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])
+}
+
+function evidenceSummary(group) {
+  const count = (source) => group.findings.filter((finding) => finding.source === source).length
+  return group.sources.map((source) => {
+    if (source === 'test-run') return `${count(source)} failing test${count(source) === 1 ? '' : 's'}`
+    return SOURCE_LABELS[source]
+  }).join(', ')
+}
+
+function renderGroup(group, context) {
+  const lead = group.findings[0]
+  const ruleId = typeof lead.ruleId === 'string' ? lead.ruleId : 'unknown'
   const title = RULE_TITLES[ruleId] ?? escapeText(ruleId, 80)
-  const source = SOURCE_LABELS[finding.source] ?? 'unknown source'
-  const confidence = finding.confidence === 'inferred' ? ' · inferred link' : ''
+  const symbol = typeof group.affected?.symbol === 'string' ? ` in <code>${escapeText(group.affected.symbol, 120)}</code>` : ''
+  const inferred = group.findings.every((finding) => finding.confidence === 'inferred') ? ' · inferred link' : ''
   const lines = [
-    `- **${title}** · ${source}${confidence} · <code>${escapeText(ruleId, 80)}</code>`,
-    `  ${renderMessage(finding.message)}`,
-    `  Changed: ${locationLink(finding.changed, context)} → Affected: ${locationLink(finding.affected, context)}`,
+    `- **${title}**${symbol} · evidence: ${evidenceSummary(group)}${inferred}`,
+    `  Affected: ${locationLink(group.affected, context)} · Changed: ${group.changed.slice(0, 5).map((location) => locationLink(location, context)).join(', ')}`,
   ]
-  const callers = Array.isArray(finding.details?.callers) ? finding.details.callers : []
-  if (callers.length > 1) {
-    const shown = callers.slice(0, 5).map((caller) => {
-      const state = caller?.affected ? 'affected' : 'not affected'
-      return `${locationLink(caller?.location, context)} (${state})`
-    })
-    lines.push(`  Callers: ${shown.join(', ')}${callers.length > 5 ? `, and ${callers.length - 5} more` : ''}`)
+  for (const finding of group.findings.slice(0, MAX_ITEMS_PER_GROUP)) {
+    const findingRule = typeof finding.ruleId === 'string' ? finding.ruleId : 'unknown'
+    const where = finding.source === 'test-run' ? ` (${locationLink(finding.affected, context)})` : ''
+    lines.push(`  - ${SOURCE_LABELS[finding.source] ?? 'unknown source'} <code>${escapeText(findingRule, 80)}</code>${where}: ${renderMessage(finding.message)}`)
+    const callers = Array.isArray(finding.details?.callers) ? finding.details.callers : []
+    if (callers.length > 1) {
+      const shown = callers.slice(0, 5).map((caller) => `${locationLink(caller?.location, context)} (${caller?.affected ? 'affected' : 'not affected'})`)
+      lines.push(`    Callers: ${shown.join(', ')}${callers.length > 5 ? `, and ${callers.length - 5} more` : ''}`)
+    }
   }
+  if (group.findings.length > MAX_ITEMS_PER_GROUP) lines.push(`  - …and ${group.findings.length - MAX_ITEMS_PER_GROUP} more pieces of evidence`)
   return lines.join('\n')
 }
 
@@ -132,26 +166,28 @@ function renderEvidence(evidence) {
 
 /** Build the PR comment body from an untrusted report and trusted workflow context. */
 export function renderComment(report, context) {
-  const findings = (Array.isArray(report?.findings) ? report.findings : []).filter(isFinding)
-  const bySeverity = Object.fromEntries(SEVERITIES.map((severity) => [severity, findings.filter((finding) => finding.severity === severity)]))
+  const groups = readGroups(report)
+  const findingCount = groups.reduce((sum, group) => sum + group.findings.length, 0)
+  const bySeverity = Object.fromEntries(SEVERITIES.map((severity) => [severity, groups.filter((group) => group.severity === severity)]))
   const stats = report?.stats ?? {}
   const n = (value) => (Number.isInteger(value) && value >= 0 ? value : 0)
   const range = context.baseSha && context.headSha ? ` · <code>${context.baseSha.slice(0, 7)}..${context.headSha.slice(0, 7)}</code>` : ''
+  const merged = findingCount > groups.length ? ` (${findingCount} pieces of evidence merged by affected location)` : ''
   const lines = [
     MARKER,
     '### CodeImpact review',
     '',
-    `**${bySeverity.high.length} high · ${bySeverity.medium.length} medium · ${bySeverity.low.length} low** — ${n(stats.changedSymbols)} changed symbols, ${n(stats.impactedSymbols)} impacted, ${n(stats.recommendedTests)} tests recommended${range}`,
+    `**${bySeverity.high.length} high · ${bySeverity.medium.length} medium · ${bySeverity.low.length} low**${merged} — ${n(stats.changedSymbols)} changed symbols, ${n(stats.impactedSymbols)} impacted, ${n(stats.recommendedTests)} tests recommended${range}`,
   ]
   const evidence = renderEvidence(report?.evidence)
   if (evidence.length > 0) lines.push('', `Evidence: ${evidence.join(' · ')}`)
-  if (findings.length === 0) lines.push('', 'No findings. That does not mean the change is safe: static analysis can miss dynamic calls.')
+  if (groups.length === 0) lines.push('', 'No findings. That does not mean the change is safe: static analysis can miss dynamic calls.')
 
   const headings = { high: '🔴 High', medium: '🟠 Medium', low: '⚪ Low' }
   for (const severity of SEVERITIES) {
     const items = bySeverity[severity]
     if (items.length === 0) continue
-    const body = items.slice(0, SHOWN[severity]).map((finding) => renderFinding(finding, context))
+    const body = items.slice(0, SHOWN[severity]).map((group) => renderGroup(group, context))
     if (items.length > SHOWN[severity]) body.push(`- …and ${items.length - SHOWN[severity]} more ${severity}-severity findings in the job summary artifact.`)
     if (severity === 'low') lines.push('', `<details><summary>${headings[severity]} (${items.length})</summary>`, '', ...body, '', '</details>')
     else lines.push('', `#### ${headings[severity]} (${items.length})`, '', ...body)
@@ -236,7 +272,7 @@ async function main() {
     } catch {
       report = undefined
     }
-    if (report && report.schemaVersion === 1) {
+    if (report && (report.schemaVersion === 1 || report.schemaVersion === 2)) {
       // The analysis ran on the merge base; prefer it for base-side links when it is a well-formed SHA.
       context.baseSha = safeSha(report.target?.baseSha) ?? context.baseSha
       rendered = renderComment(report, context)

@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -56,23 +56,59 @@ describe('untrusted text', () => {
 })
 
 describe('comment rendering', () => {
-  it('groups findings by severity with links to both locations and the evidence source', () => {
-    const { body, high } = renderComment(report([
-      finding(),
-      finding({ ruleId: 'typecheck/tsc', source: 'typecheck', message: 'tsc TS2554: Expected 3 arguments, but got 2.', changed: { path: 'src/pricing.ts', line: 1, revision: 'head' } }),
-      finding({ ruleId: 'impact/unupdated-caller', severity: 'low', confidence: 'inferred', message: 'x changed internally only.' }),
-    ], { evidence: { typecheck: [{ head: { tool: 'tsc', status: 'ran' }, reported: 1 }], tests: { runner: 'vitest', status: 'ran', selected: 2, totalTests: 9, passed: 1, failed: 1, errors: 0, skipped: 0, environmentErrors: [] } } }), context)
-    expect(high).toBe(2)
+  it('renders one merged finding per affected location, listing every piece of evidence', () => {
+    const rule = finding()
+    const tsc = finding({ ruleId: 'typecheck/tsc', source: 'typecheck', message: 'tsc TS2554: Expected 3 arguments, but got 2.' })
+    const test = finding({ ruleId: 'tests/failure', source: 'test-run', message: '`checkout > applies` fails on the PR head.', affected: { path: 'src/cart.test.ts', line: 5, revision: 'head' } })
+    const low = finding({ ruleId: 'impact/unupdated-caller', severity: 'low', confidence: 'inferred', message: 'x changed internally only.', affected: { path: 'src/other.ts', line: 2, revision: 'head' } })
+    const { body, high } = renderComment(report([rule, tsc, test, low], {
+      schemaVersion: 2,
+      groups: [
+        { severity: 'high', affected: { path: 'src/cart.ts', line: 4, revision: 'head', symbol: 'checkout' }, findings: [rule, tsc, test] },
+        { severity: 'low', affected: low.affected, findings: [low] },
+      ],
+      evidence: { typecheck: [{ head: { tool: 'tsc', status: 'ran' }, reported: 1 }], tests: { runner: 'vitest', status: 'ran', selected: 2, totalTests: 9, passed: 1, failed: 1, errors: 0, skipped: 0, environmentErrors: [] } },
+    }), context)
+    expect(high).toBe(1)
     expect(body.startsWith(MARKER)).toBe(true)
-    expect(body).toContain('**2 high · 0 medium · 1 low**')
-    expect(body).toContain('#### 🔴 High (2)')
+    expect(body).toContain('**1 high · 0 medium · 1 low** (4 pieces of evidence merged by affected location)')
+    expect(body).toContain('#### 🔴 High (1)')
     expect(body).toContain('<details><summary>⚪ Low (1)</summary>')
-    expect(body).toContain('· rule ·')
-    expect(body).toContain('· type checker ·')
+    expect(body).toContain('- **Caller misses a required argument** in <code>checkout</code> · evidence: rule, type checker, 1 failing test')
+    expect(body).toContain(`  Affected: [src/cart.ts:4](https://github.com/octo/demo/blob/${head}/src/cart.ts#L4) · Changed: [src/pricing.ts:1](https://github.com/octo/demo/blob/${head}/src/pricing.ts#L1)`)
+    expect(body).toContain('  - rule <code>signature/missing-argument</code>: <code>checkout</code> calls <code>applyDiscount</code> and does not pass')
+    expect(body).toContain('  - type checker <code>typecheck/tsc</code>: tsc TS2554')
+    expect(body).toContain(`  - test run <code>tests/failure</code> ([src/cart.test.ts:5](https://github.com/octo/demo/blob/${head}/src/cart.test.ts#L5)):`)
     expect(body).toContain('inferred link')
-    expect(body).toContain(`Changed: [src/pricing.ts:1](https://github.com/octo/demo/blob/${head}/src/pricing.ts#L1) → Affected: [src/cart.ts:4](https://github.com/octo/demo/blob/${head}/src/cart.ts#L4)`)
     expect(body).toContain('impacted tests (vitest): 2 of 9 selected, 2 ran, 1 failed')
-    expect(body).toContain('<code>checkout</code> calls <code>applyDiscount</code> and does not pass')
+  })
+
+  it('links every valid Changed and Affected location', () => {
+    const findings = [
+      finding(),
+      finding({ ruleId: 'typecheck/tsc', source: 'typecheck', affected: { path: 'src/b.ts', line: 7, revision: 'head' } }),
+      finding({ ruleId: 'reference/removed-symbol', changed: { path: 'src/old.ts', line: 3, revision: 'base' }, affected: { path: 'src/c d.ts', line: 1, revision: 'head' } }),
+      finding({ severity: 'medium', affected: { path: 'src/e.ts', line: 9, revision: 'head' } }),
+    ]
+    const { body } = renderComment(report(findings), context)
+    const locationLines = body.split('\n').filter((line) => line.startsWith('  Affected:'))
+    expect(locationLines).toHaveLength(4)
+    for (const line of locationLines) {
+      const [affected, changed] = line.replace('  Affected: ', '').split(' · Changed: ')
+      expect(affected, line).toMatch(/^\[[^\]]+\]\(https:\/\/github\.com\/octo\/demo\/blob\/[0-9a-f]{40}\/[^)]+#L\d+\)$/)
+      expect(changed, line).toMatch(/^\[[^\]]+\]\(https:\/\/github\.com\/octo\/demo\/blob\/[0-9a-f]{40}\/[^)]+#L\d+\)$/)
+    }
+    expect(body).toContain(`[src/old.ts:3 (base)](https://github.com/octo/demo/blob/${base}/src/old.ts#L3)`)
+    expect(body).toContain('[src/c d.ts:1](https://github.com/octo/demo/blob/')
+  })
+
+  it('recomputes group severity from the evidence instead of trusting the report', () => {
+    const { body, high } = renderComment(report([], {
+      schemaVersion: 2,
+      groups: [{ severity: 'low', affected: { path: 'src/a.ts', line: 1, revision: 'head' }, findings: [finding()] }],
+    }), context)
+    expect(high).toBe(1)
+    expect(body).toContain('#### 🔴 High (1)')
   })
 
   it('ignores malformed findings and never lets report fields escape into markup', () => {
@@ -128,9 +164,13 @@ describe('comment upsert', () => {
   it('reads trusted context from the event payload and detects fork pull requests', () => {
     const dir = mkdtempSync(join(tmpdir(), 'codeimpact-event-'))
     const eventPath = join(dir, 'event.json')
-    writeFileSync(eventPath, JSON.stringify({ pull_request: { number: 3, head: { sha: head, repo: { full_name: 'someone/demo' } }, base: { sha: 'not-a-sha', repo: { full_name: 'octo/demo' } } } }))
-    expect(readContext({ GITHUB_EVENT_PATH: eventPath, GITHUB_REPOSITORY: 'octo/demo', INPUT_GITHUB_TOKEN: 'x' })).toMatchObject({
-      pullNumber: 3, headSha: head, baseSha: undefined, fromFork: true, repository: 'octo/demo',
-    })
+    try {
+      writeFileSync(eventPath, JSON.stringify({ pull_request: { number: 3, head: { sha: head, repo: { full_name: 'someone/demo' } }, base: { sha: 'not-a-sha', repo: { full_name: 'octo/demo' } } } }))
+      expect(readContext({ GITHUB_EVENT_PATH: eventPath, GITHUB_REPOSITORY: 'octo/demo', INPUT_GITHUB_TOKEN: 'x' })).toMatchObject({
+        pullNumber: 3, headSha: head, baseSha: undefined, fromFork: true, repository: 'octo/demo',
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

@@ -76,9 +76,20 @@ export async function buildApp({ store, config, github, onEnqueued }: AppDeps) {
     return reply.code(500).send({ error: { code: 'internal_error', message: 'Unexpected server error.' } })
   })
 
+  if (config.showcase) {
+    // Read-only showcase: saved reports only. No new analyses, retries, webhooks, deletions, or GitHub calls.
+    app.addHook('onRequest', async (request, reply) => {
+      const readOnly = request.method === 'GET' || request.method === 'HEAD'
+      if (request.url.startsWith('/api/') && (!readOnly || request.url.startsWith('/api/github/'))) {
+        return reply.code(403).send({ error: { code: 'showcase_read_only', message: 'This is a read-only showcase of saved reports. New analyses are disabled.' } })
+      }
+    })
+  }
+
   app.get('/api/health', async () => ({ ok: true }))
 
   app.get('/api/config', async () => ({
+    showcase: config.showcase,
     githubTokenConfigured: Boolean(config.githubToken),
     webhookConfigured: Boolean(config.webhookSecret),
     localRepositories: [...config.localRepositories.keys()],

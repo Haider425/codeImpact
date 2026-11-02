@@ -31,6 +31,10 @@ export interface Config {
   port: number
   host: string
   dataDir: string
+  /** SQLite file for analyses. Showcase mode reads an exported, separate database. */
+  dbPath: string
+  /** Read-only mode: serve saved reports, refuse new analyses and every other write. */
+  showcase: boolean
   wasmBasePath: string
   githubToken?: string
   webhookSecret?: string
@@ -46,6 +50,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     port: Number(env.PORT ?? 8787),
     host: env.HOST ?? '127.0.0.1',
     dataDir: resolve(env.CODEIMPACT_DATA_DIR ?? join(ROOT, 'data')),
+    dbPath: resolve(env.CODEIMPACT_DB ?? join(env.CODEIMPACT_DATA_DIR ?? join(ROOT, 'data'), env.CODEIMPACT_SHOWCASE === '1' ? 'showcase.db' : 'codeimpact.db')),
+    showcase: env.CODEIMPACT_SHOWCASE === '1',
     wasmBasePath: join(ROOT, 'public/wasm'),
     githubToken: env.GITHUB_TOKEN || undefined,
     webhookSecret: env.GITHUB_WEBHOOK_SECRET || undefined,

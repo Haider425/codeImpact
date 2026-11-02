@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { AlertTriangle, ArrowRight, Check, FolderGit2, GitPullRequest, LoaderCircle, Play, X } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Check, Eye, FolderGit2, GitPullRequest, LoaderCircle, Play, X } from 'lucide-react'
 import { ACTIVE_STATUSES, api, ApiError, STATUS_LABELS } from '@/lib/api'
 import type { AnalysisRun, ServerConfig } from '@/lib/api'
 
@@ -85,7 +85,11 @@ export default function Dashboard() {
           </div>
         )}
 
-        {config && (
+        {config?.showcase && (
+          <p className="showcase-banner"><Eye size={16} />This is a read-only showcase of saved CodeImpact reports. Starting new analyses is disabled here; run CodeImpact yourself with the GitHub Action or the CLI.</p>
+        )}
+
+        {config && !config.showcase && (
           <div className="dashboard-grid">
             <form className="panel" onSubmit={(event) => void submit(event, () => api.analyzePullRequest(pullRequest))}>
               <span className="section-label"><GitPullRequest size={13} /> GITHUB PULL REQUEST</span>
@@ -127,7 +131,7 @@ export default function Dashboard() {
           <section className="history">
             <div className="section-heading"><div><span className="section-label">HISTORY</span><h2>Recent analyses</h2></div></div>
             {runs.length === 0
-              ? <p className="empty-note">No analyses yet. Paste a pull-request URL above to start one.</p>
+              ? <p className="empty-note">{config.showcase ? 'No reports have been published to this showcase yet.' : 'No analyses yet. Paste a pull-request URL above to start one.'}</p>
               : (
                 <div className="history-list">
                   {runs.map((run) => (

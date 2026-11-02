@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { loadConfig } from './config'
 import type { Config } from './config'
@@ -46,7 +45,11 @@ export function startWorker(store: Store, config: Config, deps: PipelineDeps = d
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const config = loadConfig()
-  const worker = startWorker(new Store(join(config.dataDir, 'codeimpact.db')), config)
+  if (config.showcase) {
+    console.error('Showcase mode is read-only; there is nothing for a worker to do.')
+    process.exit(1)
+  }
+  const worker = startWorker(new Store(config.dbPath), config)
   const shutdown = () => void worker.stop().then(() => process.exit(0))
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)

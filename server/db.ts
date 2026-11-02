@@ -185,6 +185,27 @@ export class Store {
     })()
   }
 
+  /**
+   * Record an analysis that already ran elsewhere (the CLI) as a completed run, so it can be viewed and
+   * exported. Re-recording the same commits and options replaces the stored result.
+   */
+  recordCompleted(
+    input: Pick<RunRow, 'repository_id' | 'pull_request_number' | 'pull_request_title' | 'pull_request_author' | 'base_ref' | 'head_ref' | 'base_sha' | 'head_sha' | 'dedupe_key'>,
+    payload: { result: unknown; timings: Record<string, number>; mergeBase: string; parserVersion: string; algorithmVersion: string },
+  ) {
+    return this.db.transaction(() => {
+      const existing = this.db.prepare('SELECT id FROM analysis_runs WHERE dedupe_key = ?').get(input.dedupe_key) as { id: number } | undefined
+      const id = existing?.id ?? Number(this.db.prepare(`
+        INSERT INTO analysis_runs (repository_id, pull_request_number, pull_request_title, pull_request_author, base_ref, head_ref,
+          base_sha, head_sha, status, trigger, dedupe_key, available_at, created_at, started_at)
+        VALUES (@repository_id, @pull_request_number, @pull_request_title, @pull_request_author, @base_ref, @head_ref,
+          @base_sha, @head_sha, 'completed', 'manual', @dedupe_key, @now, @now, @now)
+      `).run({ ...input, now: now() }).lastInsertRowid)
+      this.complete(id, payload)
+      return id
+    })()
+  }
+
   run(id: number) {
     return this.db.prepare('SELECT * FROM analysis_runs WHERE id = ?').get(id) as RunRow | undefined
   }

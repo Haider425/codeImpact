@@ -24,6 +24,8 @@ export interface StoredAnalysis {
   /** How many tests each baseline strategy would select, computed before the result is trimmed. */
   selection: Record<SelectionStrategy, number>
   truncated: { findings: number; tests: number; unresolved: number }
+  /** Type-checker and test-run summary, present when the analysis came from the CLI with evidence enabled. */
+  evidence?: unknown
 }
 
 /**
@@ -43,7 +45,7 @@ export function compactResult(result: AnalysisResult, base: SourceFile[], head: 
     ...findings.flatMap((f) => f.path.nodeIds),
     ...tests.flatMap((t) => t.path.nodeIds),
   ])
-  const pathEdges = new Set([...findings, ...tests].flatMap((item) => item.path.edgeIds))
+  const pathEdges = new Set([...findings, ...tests].flatMap((item) => item.path.edgeIds).concat((result.review ?? []).flatMap((finding) => finding.evidence)))
   const edges = result.edges.filter((edge) => pathEdges.has(edge.id) || (edge.type === 'calls' && graphIds.has(edge.source) && graphIds.has(edge.target)))
   const strip = (symbol: SymbolRecord): SymbolRecord => ({ ...symbol, source: '' })
   const symbols = result.symbols.filter((symbol) => keepSymbols.has(symbol.id)).map(strip)

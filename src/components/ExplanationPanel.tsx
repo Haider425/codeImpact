@@ -39,7 +39,7 @@ export function ExplanationPanel({ explanation, result, onSelect, onOpenSource }
   return (
     <section className="explanation-block" aria-label="Impact explanation">
       <div className="explanation-heading">
-        <span className="section-label">02 / EXPLANATION</span>
+        <span className="section-label">03 / EXPLANATION</span>
         <span className="validation-badge"><FileText size={13} />deterministic</span>
       </div>
       <p className="explanation-summary">{summary.split('`').map((part, index) => (index % 2 ? <code key={index}>{part}</code> : part))}</p>

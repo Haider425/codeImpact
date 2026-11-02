@@ -19,10 +19,12 @@ import {
 } from 'lucide-react'
 import type { SelectionStrategy } from '@/analysis/baselines'
 import { RANKING_WEIGHTS } from '@/analysis/engine'
+import { groupFindings } from '@/analysis/merge'
 import type { AnalysisResult, DemoRepository } from '@/analysis/types'
 import { BaselineTable } from '@/components/BaselineTable'
 import { EvidencePanel } from '@/components/EvidencePanel'
 import { ExplanationPanel } from '@/components/ExplanationPanel'
+import { FindingsPanel } from '@/components/FindingsPanel'
 import { ImpactGraph } from '@/components/ImpactGraph'
 import { SourceDialog } from '@/components/SourceDialog'
 import type { SourceSelection } from '@/components/SourceDialog'
@@ -79,6 +81,8 @@ export function ReportView({ repository, result, mode, explanation, selection, c
     URL.revokeObjectURL(url)
   }
 
+  // Stored reports from before the review rules existed have no `review` field.
+  const findingGroups = useMemo(() => groupFindings(result.review ?? [], result.edges), [result])
   const changedPaths = useMemo(() => new Set(changedFiles?.map((file) => file.path)
     ?? repository.head.files.filter((file) => repository.base.files.find((candidate) => candidate.path === file.path)?.source !== file.source).map((file) => file.path)), [changedFiles, repository])
   const filteredFiles = useMemo(() => repository.head.files.filter((file) => file.path.toLowerCase().includes(fileQuery.toLowerCase())), [fileQuery, repository])
@@ -90,7 +94,7 @@ export function ReportView({ repository, result, mode, explanation, selection, c
   const short = (sha: string) => sha.slice(0, 7)
 
   const navItems: { id: View; label: string; icon: typeof Code2; count?: number }[] = [
-    { id: 'report', label: 'Impact report', icon: Code2 },
+    { id: 'report', label: 'Impact report', icon: Code2, count: findingGroups.length || undefined },
     { id: 'map', label: 'Dependency map', icon: Network, count: result.graphSymbolIds.length },
     { id: 'tests', label: 'Recommended tests', icon: FlaskConical, count: result.stats.recommendedTests },
     { id: 'files', label: mode === 'demo' ? 'Source files' : 'Evidence files', icon: Files, count: repository.head.files.length },
@@ -177,6 +181,8 @@ export function ReportView({ repository, result, mode, explanation, selection, c
                 <div><span>Test attention</span><strong>{String(result.stats.recommendedTests).padStart(2, '0')}</strong><small>of {result.stats.totalTests} · not run</small></div>
                 <div><span>Unresolved</span><strong>{String(result.stats.unresolved).padStart(2, '0')}</strong><small>{result.stats.inferredCallEdges} inferred edges</small></div>
               </section>
+
+              <FindingsPanel groups={findingGroups} onOpenSource={openSource} onSelect={setSelectedId} />
 
               {explanation && <ExplanationPanel explanation={explanation} result={result} onSelect={setSelectedId} onOpenSource={openSource} />}
 

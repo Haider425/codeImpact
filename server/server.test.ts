@@ -25,6 +25,8 @@ function testConfig(overrides: Partial<Config> = {}): Config {
     dataDir: join(workspace, 'data'),
     localRepositories: new Map([['sample', repoDir]]),
     webhookSecret: 'shh',
+    showcase: false,
+    dbPath: ':memory:',
     ...overrides,
   }
 }

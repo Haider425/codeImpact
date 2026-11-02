@@ -14,7 +14,8 @@
     "worker": "tsx server/worker.ts",
     "bench": "tsx server/eval/run.ts",
     "typecheck": "tsc -b",
-    "review": "tsx server/review-cli.ts"
+    "review": "tsx server/review-cli.ts",
+    "showcase:export": "tsx server/showcase-export.ts"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.1.3",
